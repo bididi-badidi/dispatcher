@@ -3,9 +3,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
+import shlex
 import subprocess
 import sys
+from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +19,112 @@ DEFAULT_LOG_DIR = ".dispatcher/logs"
 DEFAULT_LABEL = "automate"
 DEFAULT_BASE_BRANCH = "main"
 DEFAULT_BRANCH_PREFIX = "feat/issue-"
+BANNED_AGENT_FLAGS = {
+    "--allow-dangerously-skip-permissions",
+    "--dangerously-bypass-approvals-and-sandbox",
+    "--dangerously-skip-permissions",
+    "--full-auto",
+    "--yolo",
+    "-y",
+}
+GEMINI_WORKTREE_ALLOWED_TOOLS = (
+    "list_directory",
+    "read_file",
+    "read_many_files",
+    "glob",
+    "grep_search",
+    "web_fetch",
+    "run_shell_command(bash)",
+    "run_shell_command(bun)",
+    "run_shell_command(cp)",
+    "run_shell_command(dirname)",
+    "run_shell_command(find)",
+    "run_shell_command(git)",
+    "run_shell_command(grep)",
+    "run_shell_command(ls)",
+    "run_shell_command(mkdir)",
+    "run_shell_command(npm)",
+    "run_shell_command(pnpm)",
+    "run_shell_command(pwd)",
+    "run_shell_command(rsync)",
+    "run_shell_command(sh)",
+    "run_shell_command(test)",
+    "run_shell_command(yarn)",
+)
+CLAUDE_PLAN_ALLOWED_TOOLS = (
+    "Read",
+    "Glob",
+    "Grep",
+    "Write(.ai/assets/branches/**)",
+    "Edit(.ai/assets/branches/**)",
+    "MultiEdit(.ai/assets/branches/**)",
+    "Bash(gh issue list *)",
+    "Bash(gh issue view *)",
+    "Bash(gh pr checks *)",
+    "Bash(gh pr diff *)",
+    "Bash(gh pr list *)",
+    "Bash(gh pr status *)",
+    "Bash(gh pr view *)",
+    "Bash(gh repo list *)",
+    "Bash(gh repo view *)",
+    "Bash(gh search code *)",
+    "Bash(gh search commits *)",
+    "Bash(gh search issues *)",
+    "Bash(gh search prs *)",
+    "Bash(gh search repos *)",
+    "Bash(git branch *)",
+    "Bash(git diff *)",
+    "Bash(git log *)",
+    "Bash(git ls-files *)",
+    "Bash(git status *)",
+    "Bash(find *)",
+    "Bash(ls *)",
+    "Bash(pwd)",
+)
+CLAUDE_PLAN_DISALLOWED_TOOLS = (
+    "Bash(chmod *)",
+    "Bash(chown *)",
+    "Bash(dd *)",
+    "Bash(dropdb *)",
+    "Bash(gh api * --method DELETE *)",
+    "Bash(gh api * --method PATCH *)",
+    "Bash(gh api * --method POST *)",
+    "Bash(gh api * -X DELETE *)",
+    "Bash(gh api * -X PATCH *)",
+    "Bash(gh api * -X POST *)",
+    "Bash(gh issue close *)",
+    "Bash(gh issue comment *)",
+    "Bash(gh issue create *)",
+    "Bash(gh issue delete *)",
+    "Bash(gh issue develop *)",
+    "Bash(gh issue edit *)",
+    "Bash(gh issue lock *)",
+    "Bash(gh issue pin *)",
+    "Bash(gh issue reopen *)",
+    "Bash(gh issue transfer *)",
+    "Bash(gh pr close *)",
+    "Bash(gh pr comment *)",
+    "Bash(gh pr create *)",
+    "Bash(gh pr edit *)",
+    "Bash(gh pr lock *)",
+    "Bash(gh pr merge *)",
+    "Bash(gh pr ready *)",
+    "Bash(gh pr reopen *)",
+    "Bash(gh pr review *)",
+    "Bash(git branch -D *)",
+    "Bash(git branch --delete --force *)",
+    "Bash(git clean *)",
+    "Bash(git push --delete *)",
+    "Bash(git push --force *)",
+    "Bash(git push --force-with-lease *)",
+    "Bash(git push -f *)",
+    "Bash(git reset --hard *)",
+    "Bash(kubectl delete *)",
+    "Bash(mv *)",
+    "Bash(psql *DROP*)",
+    "Bash(rm *)",
+    "Bash(rsync --delete *)",
+)
 
 
 @dataclass(frozen=True)
@@ -94,11 +201,6 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def slugify(value: str) -> str:
-    slug = re.sub(r"[^a-zA-Z0-9._-]+", "-", value.strip().lower())
-    return slug.strip("-") or "issue"
-
-
 def run_json(command: Sequence[str], cwd: Path) -> Any:
     completed = subprocess.run(
         command,
@@ -158,69 +260,210 @@ def render_template(
 
 def default_worktree_command() -> str:
     return (
-        'gemini -p "Create a git worktree for GitHub issue #$issue_number '
+        "Create a git worktree for GitHub issue #$issue_number "
         "($issue_title) from $project_dir at $worktree on branch $branch based on "
         "$base_branch. Use the repository git-worktree skill and copy gitignored "
-        '.env files as required."'
+        ".env files as required."
     )
 
 
 def default_plan_command() -> str:
     return (
-        'claude -p "Read GitHub issue #$issue_number for $repo: $issue_url. '
-        "Write the feature implementation plan into .assets/ in this worktree, "
-        'using the project instructions. Do not implement code."'
+        "Read GitHub issue #$issue_number for $repo: $issue_url. "
+        "Save the feature implementation plan under "
+        ".ai/assets/branches/$branch/ in this worktree, using the project "
+        "instructions. Do not modify code."
     )
 
 
 def default_build_command() -> str:
     return (
-        'codex exec "Read the implementation plan in .assets/ for GitHub issue '
-        "#$issue_number, implement it, run relevant checks, commit to $branch, "
-        'push, and open a draft PR. Stop after PR creation."'
+        "Read the implementation plan from the branch assets directory "
+        ".ai/assets/branches/$branch/ for GitHub issue #$issue_number, "
+        "implement it, run relevant checks, commit to $branch, push, and open "
+        "a draft PR. Stop after PR creation."
     )
+
+
+class AgentRunner(ABC):
+    stage_name: str
+    executable: str
+    version_args: Sequence[str] = ("--version",)
+
+    def __init__(self, prompt_template: str) -> None:
+        self.prompt_template = prompt_template
+
+    def prompt(self, issue: Issue, config: Config, worktree: Path, branch: str) -> str:
+        return render_template(self.prompt_template, issue, config, worktree, branch)
+
+    @abstractmethod
+    def cwd(self, config: Config, worktree: Path) -> Path:
+        """Return the process working directory for this provider stage."""
+
+    @abstractmethod
+    def command(self, prompt: str, cwd: Path) -> list[str]:
+        """Build the provider CLI argv for this provider stage."""
+
+    def env(self) -> dict[str, str] | None:
+        return None
+
+    def stdin(self, prompt: str) -> str | None:
+        return None
+
+    def version(self) -> str:
+        try:
+            completed = subprocess.run(
+                [self.executable, *self.version_args],
+                check=False,
+                text=True,
+                capture_output=True,
+                timeout=10,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return f"unavailable ({exc})"
+
+        output = (completed.stdout or completed.stderr).strip()
+        return output or f"unknown (exit {completed.returncode})"
+
+    def run(self, issue: Issue, config: Config, worktree: Path, branch: str) -> None:
+        prompt = self.prompt(issue, config, worktree, branch)
+        cwd = self.cwd(config, worktree)
+        command = self.command(prompt, cwd)
+        self._validate_command(command)
+
+        config.paths.log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = config.paths.log_dir / f"issue-{issue.number}-{self.stage_name}.log"
+        version = self.version()
+        command_text = shlex.join(command)
+        stdin_text = self.stdin(prompt)
+        stdin_log = f"\n\n[stdin]\n{stdin_text}" if stdin_text is not None else ""
+
+        if config.dry_run:
+            log_path.write_text(
+                f"DRY RUN: {command_text}{stdin_log}\n\n[version]\n{version}\n",
+                encoding="utf-8",
+            )
+            return
+
+        completed = subprocess.run(
+            command,
+            cwd=cwd,
+            env=self.env(),
+            input=stdin_text,
+            text=True,
+            capture_output=True,
+        )
+        log_path.write_text(
+            f"$ {command_text}{stdin_log}\n\n[version]\n{version}\n\n[stdout]\n"
+            f"{completed.stdout}\n\n[stderr]\n{completed.stderr}",
+            encoding="utf-8",
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(
+                f"{self.stage_name} stage failed with exit code "
+                f"{completed.returncode}; see {log_path}"
+            )
+
+    def _validate_command(self, command: Sequence[str]) -> None:
+        used_banned_flags = sorted(BANNED_AGENT_FLAGS.intersection(command))
+        if used_banned_flags:
+            raise ValueError(
+                f"{self.stage_name} runner uses prohibited flag(s): "
+                f"{', '.join(used_banned_flags)}"
+            )
+
+
+class GeminiRunner(AgentRunner):
+    stage_name = "worktree"
+    executable = "gemini"
+
+    def cwd(self, config: Config, worktree: Path) -> Path:
+        return config.paths.project_dir
+
+    def command(self, prompt: str, cwd: Path) -> list[str]:
+        return [
+            self.executable,
+            "--approval-mode",
+            "auto_edit",
+            "--allowed-tools",
+            ",".join(GEMINI_WORKTREE_ALLOWED_TOOLS),
+            "--prompt",
+            prompt,
+        ]
+
+    def env(self) -> dict[str, str]:
+        env = os.environ.copy()
+        env.pop("GEMINI_SANDBOX", None)
+        env.pop("SEATBELT_PROFILE", None)
+        env.pop("SANDBOX_FLAGS", None)
+        return env
+
+
+class ClaudeRunner(AgentRunner):
+    stage_name = "plan"
+    executable = "claude"
+
+    def cwd(self, config: Config, worktree: Path) -> Path:
+        return worktree
+
+    def command(self, prompt: str, cwd: Path) -> list[str]:
+        return [
+            self.executable,
+            "--print",
+            "--permission-mode",
+            "acceptEdits",
+            "--allowedTools",
+            ",".join(CLAUDE_PLAN_ALLOWED_TOOLS),
+            "--disallowedTools",
+            ",".join(CLAUDE_PLAN_DISALLOWED_TOOLS),
+        ]
+
+    def stdin(self, prompt: str) -> str:
+        return prompt
+
+
+class CodexRunner(AgentRunner):
+    stage_name = "build"
+    executable = "codex"
+
+    def cwd(self, config: Config, worktree: Path) -> Path:
+        return worktree
+
+    def command(self, prompt: str, cwd: Path) -> list[str]:
+        return [
+            self.executable,
+            "exec",
+            "--sandbox",
+            "workspace-write",
+            "--cd",
+            str(cwd),
+            prompt,
+        ]
+
+
+def build_stage_runners(config: Config) -> dict[str, AgentRunner]:
+    return {
+        "worktree": GeminiRunner(config.commands.worktree),
+        "plan": ClaudeRunner(config.commands.plan),
+        "build": CodexRunner(config.commands.build),
+    }
 
 
 def run_stage(
     name: str,
-    template: str,
+    runner: AgentRunner,
     issue: Issue,
     config: Config,
     worktree: Path,
     branch: str,
 ) -> None:
-    command = render_template(template, issue, config, worktree, branch)
-    config.paths.log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = config.paths.log_dir / f"issue-{issue.number}-{name}.log"
-
-    if config.dry_run:
-        log_path.write_text(f"DRY RUN: {command}\n", encoding="utf-8")
-        return
-
-    cwd = config.paths.project_dir if name == "worktree" else worktree
-    completed = subprocess.run(
-        command,
-        cwd=cwd,
-        shell=True,
-        text=True,
-        capture_output=True,
-    )
-    log_path.write_text(
-        f"$ {command}\n\n[stdout]\n{completed.stdout}\n\n[stderr]\n{completed.stderr}",
-        encoding="utf-8",
-    )
-    if completed.returncode != 0:
-        raise RuntimeError(
-            f"{name} stage failed with exit code {completed.returncode}; see {log_path}"
-        )
+    if runner.stage_name != name:
+        raise ValueError(f"runner {runner.stage_name!r} cannot run {name!r}")
+    runner.run(issue, config, worktree, branch)
 
 
 def worktree_path_for_issue(config: Config, issue: Issue) -> Path:
-    project_name = config.paths.project_dir.name
-    return (
-        config.paths.worktree_root
-        / f"{project_name}-{issue.number}-{slugify(issue.title)[:40]}"
-    )
+    return config.paths.worktree_root / branch_for_issue(config, issue)
 
 
 def branch_for_issue(config: Config, issue: Issue) -> str:
@@ -234,6 +477,7 @@ def run_pipeline(issue: Issue, config: Config, store: StateStore) -> IssueState:
 
     worktree = worktree_path_for_issue(config, issue)
     branch = branch_for_issue(config, issue)
+    runners = build_stage_runners(config)
     state = IssueState(
         number=issue.number,
         title=issue.title,
@@ -246,17 +490,17 @@ def run_pipeline(issue: Issue, config: Config, store: StateStore) -> IssueState:
     store.upsert(state)
 
     try:
-        run_stage("worktree", config.commands.worktree, issue, config, worktree, branch)
+        run_stage("worktree", runners["worktree"], issue, config, worktree, branch)
         state.status = "worktree_created"
         state.updated_at = utc_now()
         store.upsert(state)
 
-        run_stage("plan", config.commands.plan, issue, config, worktree, branch)
+        run_stage("plan", runners["plan"], issue, config, worktree, branch)
         state.status = "planned"
         state.updated_at = utc_now()
         store.upsert(state)
 
-        run_stage("build", config.commands.build, issue, config, worktree, branch)
+        run_stage("build", runners["build"], issue, config, worktree, branch)
         state.status = "built"
         state.updated_at = utc_now()
         store.upsert(state)
@@ -278,6 +522,10 @@ def first_unstarted_issue(issues: Sequence[Issue], store: StateStore) -> Issue |
     return None
 
 
+def repo_name_from_full_name(repo: str) -> str:
+    return repo.rsplit("/", maxsplit=1)[-1]
+
+
 def build_config(argv: Sequence[str] | None = None) -> Config:
     parser = argparse.ArgumentParser(
         description="Run the local issue-triggered dispatcher happy path."
@@ -294,7 +542,14 @@ def build_config(argv: Sequence[str] | None = None) -> Config:
         "--branch-prefix",
         default=os.getenv("DISPATCHER_BRANCH_PREFIX", DEFAULT_BRANCH_PREFIX),
     )
-    parser.add_argument("--project-dir", type=Path, default=Path.cwd())
+    parser.add_argument(
+        "--project-dir",
+        type=Path,
+        help=(
+            "Base checkout where the worktree agent runs. Defaults to "
+            "<worktree-root>/<base-branch>."
+        ),
+    )
     parser.add_argument("--worktree-root", type=Path)
     parser.add_argument(
         "--state-file",
@@ -325,14 +580,18 @@ def build_config(argv: Sequence[str] | None = None) -> Config:
     )
     args = parser.parse_args(argv)
 
-    project_dir = args.project_dir.resolve()
-    worktree_root = (args.worktree_root or project_dir.parent).resolve()
+    dispatcher_dir = Path.cwd().resolve()
+    repo_name = repo_name_from_full_name(args.repo)
+    worktree_root = (args.worktree_root or dispatcher_dir.parent / repo_name).resolve()
+    project_dir = (args.project_dir or worktree_root / args.base_branch).resolve()
     state_file = (
         args.state_file
         if args.state_file.is_absolute()
-        else project_dir / args.state_file
+        else dispatcher_dir / args.state_file
     )
-    log_dir = args.log_dir if args.log_dir.is_absolute() else project_dir / args.log_dir
+    log_dir = (
+        args.log_dir if args.log_dir.is_absolute() else dispatcher_dir / args.log_dir
+    )
 
     return Config(
         repo=args.repo,

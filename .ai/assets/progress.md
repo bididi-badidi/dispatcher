@@ -17,4 +17,4 @@ No upcoming tasks
 
 ## Phases
 
-- [x] Phase 1 skeleton: local dispatcher CLI detects labelled issues, records JSON state, runs worktree/plan/build stage commands, and stops after PR creation. Tests cover issue selection, dry-run orchestration, and GitHub CLI polling.
+- [x] Phase 1 skeleton: local dispatcher CLI detects labelled issues, records JSON state, uses the `/Projects/{repo_name}/{branch_name}` worktree convention, runs worktree/plan/build stage commands, and stops after PR creation. Tests cover issue selection, dry-run orchestration, and GitHub CLI polling.
