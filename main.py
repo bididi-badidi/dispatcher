@@ -28,12 +28,14 @@ BANNED_AGENT_FLAGS = {
     "-y",
 }
 GEMINI_WORKTREE_ALLOWED_TOOLS = (
+    "activate_skill",
     "list_directory",
     "read_file",
     "read_many_files",
     "glob",
     "grep_search",
     "web_fetch",
+    "run_shell_command",
     "run_shell_command(bash)",
     "run_shell_command(bun)",
     "run_shell_command(cp)",
@@ -261,28 +263,68 @@ def render_template(
 def default_worktree_command() -> str:
     return (
         "Create a git worktree for GitHub issue #$issue_number "
-        "($issue_title) from $project_dir at $worktree on branch $branch based on "
-        "$base_branch. Use the repository git-worktree skill and copy gitignored "
-        ".env files as required."
+        "($issue_title) based on main."
     )
 
 
 def default_plan_command() -> str:
     return (
-        "Read GitHub issue #$issue_number for $repo: $issue_url. "
-        "Save the feature implementation plan under "
-        ".ai/assets/branches/$branch/ in this worktree, using the project "
+        "Read GitHub issue #$issue_number for this repo. Save the feature "
+        "implementation plan under branch assets using the project "
         "instructions. Do not modify code."
     )
 
 
 def default_build_command() -> str:
     return (
-        "Read the implementation plan from the branch assets directory "
-        ".ai/assets/branches/$branch/ for GitHub issue #$issue_number, "
-        "implement it, run relevant checks, commit to $branch, push, and open "
-        "a draft PR. Stop after PR creation."
+        "Read the implementation plan from the branch assets for GitHub issue "
+        "#$issue_number. implement it, run relevant checks, push commit to "
+        "remote, and open a draft PR. Stop after PR creation."
     )
+
+
+def worktree_git_dir(worktree: Path) -> Path | None:
+    git_marker = worktree / ".git"
+    if git_marker.is_dir():
+        return git_marker.resolve()
+    if not git_marker.is_file():
+        return None
+
+    prefix = "gitdir:"
+    marker = git_marker.read_text(encoding="utf-8").strip()
+    if not marker.startswith(prefix):
+        return None
+
+    git_dir = Path(marker.removeprefix(prefix).strip())
+    if not git_dir.is_absolute():
+        git_dir = worktree / git_dir
+    return git_dir.resolve()
+
+
+def common_git_dir(git_dir: Path) -> Path:
+    common_dir_marker = git_dir / "commondir"
+    if not common_dir_marker.is_file():
+        return git_dir
+
+    common_dir = Path(common_dir_marker.read_text(encoding="utf-8").strip())
+    if not common_dir.is_absolute():
+        common_dir = git_dir / common_dir
+    return common_dir.resolve()
+
+
+def codex_git_write_dirs(worktree: Path) -> list[Path]:
+    git_dir = worktree_git_dir(worktree)
+    if git_dir is None:
+        return []
+
+    workspace = worktree.resolve()
+    write_dirs: list[Path] = []
+    for git_write_dir in (git_dir, common_git_dir(git_dir)):
+        if git_write_dir == workspace or workspace in git_write_dir.parents:
+            continue
+        if git_write_dir not in write_dirs:
+            write_dirs.append(git_write_dir)
+    return write_dirs
 
 
 class AgentRunner(ABC):
@@ -430,15 +472,22 @@ class CodexRunner(AgentRunner):
         return worktree
 
     def command(self, prompt: str, cwd: Path) -> list[str]:
-        return [
+        command = [
             self.executable,
             "exec",
             "--sandbox",
             "workspace-write",
-            "--cd",
-            str(cwd),
-            prompt,
         ]
+        for git_write_dir in codex_git_write_dirs(cwd):
+            command.extend(["--add-dir", str(git_write_dir)])
+        command.extend(
+            [
+                "--cd",
+                str(cwd),
+                prompt,
+            ]
+        )
+        return command
 
 
 def build_stage_runners(config: Config) -> dict[str, AgentRunner]:

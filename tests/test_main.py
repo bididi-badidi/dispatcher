@@ -58,6 +58,13 @@ class DispatcherTests(unittest.TestCase):
             self.assertIsNotNone(issue)
             self.assertEqual(issue.number, 2)
 
+    def test_default_worktree_prompt_is_minimal(self) -> None:
+        self.assertEqual(
+            main.default_worktree_command(),
+            "Create a git worktree for GitHub issue #$issue_number "
+            "($issue_title) based on main.",
+        )
+
     def test_dry_run_pipeline_records_state_and_stage_logs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             repo_root = Path(temp_dir) / "repo"
@@ -140,6 +147,11 @@ class DispatcherTests(unittest.TestCase):
             root = Path(temp_dir)
             config = self.make_config(root)
             worktree = root / "feat" / "issue-9"
+            git_dir = root / "main" / ".git" / "worktrees" / "issue-9"
+            git_dir.mkdir(parents=True)
+            worktree.mkdir(parents=True)
+            (worktree / ".git").write_text(f"gitdir: {git_dir}\n", encoding="utf-8")
+            (git_dir / "commondir").write_text("../..\n", encoding="utf-8")
             runners = main.build_stage_runners(config)
 
             gemini = runners["worktree"].command("make worktree", root)
@@ -151,12 +163,14 @@ class DispatcherTests(unittest.TestCase):
             gemini_allowed_tools = gemini[gemini.index("--allowed-tools") + 1].split(
                 ","
             )
+            self.assertIn("activate_skill", gemini_allowed_tools)
             self.assertIn("list_directory", gemini_allowed_tools)
             self.assertIn("read_file", gemini_allowed_tools)
             self.assertIn("read_many_files", gemini_allowed_tools)
             self.assertIn("glob", gemini_allowed_tools)
             self.assertIn("grep_search", gemini_allowed_tools)
             self.assertIn("web_fetch", gemini_allowed_tools)
+            self.assertIn("run_shell_command", gemini_allowed_tools)
             self.assertIn("run_shell_command(git)", gemini_allowed_tools)
             self.assertIn("run_shell_command(bash)", gemini_allowed_tools)
             self.assertIn("run_shell_command(ls)", gemini_allowed_tools)
@@ -198,6 +212,15 @@ class DispatcherTests(unittest.TestCase):
             self.assertEqual(
                 codex[:4], ["codex", "exec", "--sandbox", "workspace-write"]
             )
+            codex_add_dirs = [
+                codex[index + 1]
+                for index, value in enumerate(codex[:-1])
+                if value == "--add-dir"
+            ]
+            self.assertEqual(
+                codex_add_dirs,
+                [str(git_dir.resolve()), str((root / "main" / ".git").resolve())],
+            )
             self.assertIn("--cd", codex)
 
             for command in [gemini, claude, codex]:
@@ -208,6 +231,13 @@ class DispatcherTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "prohibited flag"):
             runner._validate_command(["codex", "exec", "--yolo", "prompt"])
+
+    def test_codex_git_write_dirs_stay_empty_for_a_normal_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            worktree = Path(temp_dir)
+            (worktree / ".git").mkdir()
+
+            self.assertEqual(main.codex_git_write_dirs(worktree), [])
 
     def test_gemini_runner_does_not_inherit_sandbox_environment(self) -> None:
         runner = main.GeminiRunner("prompt")
@@ -232,15 +262,23 @@ class DispatcherTests(unittest.TestCase):
     def test_default_plan_prompt_uses_branch_assets_and_code_wording(self) -> None:
         prompt = main.default_plan_command()
 
-        self.assertIn(".ai/assets/branches/$branch/", prompt)
+        self.assertIn("Read GitHub issue #$issue_number for this repo.", prompt)
+        self.assertIn("under branch assets using the project instructions.", prompt)
         self.assertIn("Do not modify code.", prompt)
+        self.assertNotIn("$repo", prompt)
+        self.assertNotIn("$issue_url", prompt)
         self.assertNotIn("Do not implement code.", prompt)
 
     def test_default_build_prompt_reads_from_branch_assets(self) -> None:
         prompt = main.default_build_command()
 
-        self.assertIn("branch assets directory .ai/assets/branches/$branch/", prompt)
-        self.assertIn("open a draft PR", prompt)
+        self.assertEqual(
+            prompt,
+            "Read the implementation plan from the branch assets for GitHub "
+            "issue #$issue_number. implement it, run relevant checks, push "
+            "commit to remote, and open a draft PR. Stop after PR creation.",
+        )
+        self.assertNotIn("$branch", prompt)
 
 
 if __name__ == "__main__":

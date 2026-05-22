@@ -48,8 +48,10 @@ The default runners use:
 - Gemini: `gemini --approval-mode auto_edit --allowed-tools ... --prompt`.
   The allowlist includes Gemini's real filesystem/search/fetch tool names
   (`list_directory`, `read_file`, `read_many_files`, `glob`, `grep_search`,
-  `web_fetch`) plus scoped `run_shell_command(...)` prefixes for git,
-  worktree setup, dependency install commands, and shell inspection commands.
+  `web_fetch`), `activate_skill`, and `run_shell_command` for the
+  skill-driven worktree bootstrap flow. Scoped `run_shell_command(...)`
+  prefixes remain listed as documentation for the common git, worktree setup,
+  dependency install, and shell inspection commands.
   The dispatcher does not pass `--sandbox` to Gemini and removes inherited
   Gemini sandbox environment variables so macOS Seatbelt does not restrict
   worktree creation outside `/Projects/{repo_name}/main`.
@@ -58,7 +60,10 @@ The default runners use:
   commands, read-only `gh` commands, and writes under `.ai/assets/branches/`;
   mutating `gh` commands and destructive shell commands such as `rm`, hard
   resets, forced pushes, and delete-style commands are explicitly denied.
-- Codex: `codex exec --sandbox workspace-write --cd <worktree>`.
+- Codex: `codex exec --sandbox workspace-write --add-dir <git-dir> --cd <worktree>`.
+  For linked worktrees, the runner reads the worktree `.git` metadata and adds
+  both its per-worktree Git admin directory and shared Git directory when they
+  sit outside Codex's writable workspace root.
 
 The dispatcher rejects yolo or dangerous skip/bypass flags before launching any
 agent subprocess.
