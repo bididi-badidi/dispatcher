@@ -117,10 +117,25 @@ async def async_run_langgraph_pipeline(
         initial_state["pr_url"] = existing.get("pr_url")
 
     graph = _build_graph(config, store, issue, shutdown_event)
+    graph = _build_graph(config, store, issue, shutdown_event)
     try:
         final_state = await graph.ainvoke(initial_state)
     except Exception as exc:
+        # Preserve whatever the last persisted node wrote, if any, so failures
+        # late in the graph don't overwrite useful progress in the state store.
+        latest = store.get(config.repo, issue.number) or {}
         failed_state = dict(initial_state)
+        for key in (
+            "build_iteration",
+            "build_feedback",
+            "plan_review",
+            "plan_review_feedback",
+            "quality_review",
+            "quality_review_feedback",
+            "pr_url",
+        ):
+            if key in latest:
+                failed_state[key] = latest[key]
         failed_state["status"] = "failed"
         failed_state["error"] = str(exc)
         failed_state["worker_id"] = None
