@@ -5,6 +5,7 @@ DEFAULT_LOG_DIR = ".dispatcher/logs"
 DEFAULT_LABEL = "automate"
 DEFAULT_BASE_BRANCH = "main"
 DEFAULT_BRANCH_PREFIX = "feat/issue-"
+DEFAULT_POLL_INTERVAL_SECONDS = 120.0
 
 BANNED_AGENT_FLAGS = {
     "--allow-dangerously-skip-permissions",

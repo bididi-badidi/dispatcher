@@ -10,6 +10,7 @@ from dispatcher.constants import (
     DEFAULT_BRANCH_PREFIX,
     DEFAULT_LABEL,
     DEFAULT_LOG_DIR,
+    DEFAULT_POLL_INTERVAL_SECONDS,
     DEFAULT_STATE_FILE,
 )
 from dispatcher.git import default_worktree_root, repo_name_from_full_name
@@ -19,6 +20,20 @@ from dispatcher.prompts import (
     default_plan_command,
     default_worktree_command,
 )
+
+
+def positive_float(value: str) -> float:
+    parsed = float(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be greater than 0")
+    return parsed
+
+
+def positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be greater than 0")
+    return parsed
 
 
 def build_config(argv: Sequence[str] | None = None) -> Config:
@@ -73,6 +88,31 @@ def build_config(argv: Sequence[str] | None = None) -> Config:
         action="store_true",
         help="Write stage commands to logs without running agents.",
     )
+    parser.add_argument(
+        "--poll-interval",
+        type=positive_float,
+        default=os.getenv(
+            "DISPATCHER_POLL_INTERVAL_SECONDS",
+            str(DEFAULT_POLL_INTERVAL_SECONDS),
+        ),
+        help="Seconds to wait between polling cycles. Defaults to 120.",
+    )
+    parser.add_argument(
+        "--once",
+        action="store_true",
+        help="Run one polling cycle and exit instead of long polling.",
+    )
+    parser.add_argument(
+        "--daemon",
+        action="store_true",
+        help="Run as an async daemon with a concurrent worker queue.",
+    )
+    parser.add_argument(
+        "--max-workers",
+        type=positive_int,
+        default=3,
+        help="Maximum concurrent pipelines in daemon mode. Defaults to 3.",
+    )
     args = parser.parse_args(argv)
 
     dispatcher_dir = Path.cwd().resolve()
@@ -108,4 +148,8 @@ def build_config(argv: Sequence[str] | None = None) -> Config:
             build=args.build_command,
         ),
         dry_run=args.dry_run,
+        poll_interval_seconds=args.poll_interval,
+        once=args.once,
+        daemon=args.daemon,
+        max_workers=args.max_workers,
     )

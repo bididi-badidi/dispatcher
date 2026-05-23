@@ -3,7 +3,9 @@ from __future__ import annotations
 import subprocess
 import sys
 
-from dispatcher.cli import main
+from dispatcher.async_pipeline import async_run_pipeline
+from dispatcher.async_runners import async_run_stage
+from dispatcher.cli import _run_daemon, main, run_once, run_polling_loop
 from dispatcher.config import build_config
 from dispatcher.constants import (
     BANNED_AGENT_FLAGS,
@@ -13,6 +15,7 @@ from dispatcher.constants import (
     DEFAULT_BRANCH_PREFIX,
     DEFAULT_LABEL,
     DEFAULT_LOG_DIR,
+    DEFAULT_POLL_INTERVAL_SECONDS,
     DEFAULT_STATE_FILE,
     GEMINI_WORKTREE_ALLOWED_TOOLS,
 )
@@ -29,6 +32,7 @@ from dispatcher.git import (
 from dispatcher.github import list_triggered_issues
 from dispatcher.models import Commands, Config, Issue, IssueState, Paths
 from dispatcher.pipeline import first_unstarted_issue, run_pipeline
+from dispatcher.queue import Dispatcher, QueueSnapshot, Task, TaskType
 from dispatcher.prompts import (
     default_build_command,
     default_plan_command,
@@ -60,13 +64,21 @@ __all__ = [
     "DEFAULT_BRANCH_PREFIX",
     "DEFAULT_LABEL",
     "DEFAULT_LOG_DIR",
+    "DEFAULT_POLL_INTERVAL_SECONDS",
     "DEFAULT_STATE_FILE",
+    "Dispatcher",
     "GEMINI_WORKTREE_ALLOWED_TOOLS",
     "GeminiRunner",
     "Issue",
     "IssueState",
     "Paths",
+    "QueueSnapshot",
     "StateStore",
+    "Task",
+    "TaskType",
+    "_run_daemon",
+    "async_run_pipeline",
+    "async_run_stage",
     "branch_for_issue",
     "build_config",
     "build_stage_runners",
@@ -84,7 +96,9 @@ __all__ = [
     "repo_name_from_full_name",
     "require_worktree_path",
     "run_json",
+    "run_once",
     "run_pipeline",
+    "run_polling_loop",
     "run_stage",
     "subprocess",
     "utc_now",

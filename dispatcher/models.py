@@ -35,6 +35,10 @@ class Config:
     paths: Paths
     commands: Commands
     dry_run: bool
+    poll_interval_seconds: float = 120.0
+    once: bool = False
+    daemon: bool = False
+    max_workers: int = 3
 
 
 @dataclass
@@ -47,3 +51,5 @@ class IssueState:
     worktree: str
     updated_at: str
     error: str | None = None
+    task_type: str = "fresh"
+    worker_id: int | None = None
