@@ -18,7 +18,7 @@ Useful options:
 - `--label automate` chooses the trigger label.
 - `--base-branch main` chooses the branch used for the worktree.
 - The base checkout defaults to `/Projects/{repo_name}/main` when the
-  dispatcher is run from `/Projects/dispatcher`.
+  dispatcher is run from `/Projects/dispatcher` or `/Projects/dispatcher/main`.
 - New worktrees default to `/Projects/{repo_name}/{branch_name}`.
 - Dispatcher state and logs stay under the dispatcher directory by default.
 - `--dry-run` writes the stage commands to `.dispatcher/logs/` without running
@@ -87,3 +87,15 @@ uv run ruff format .
 uv run ruff check .
 uv run pytest
 ```
+
+## Code Layout
+
+- `main.py` is a thin compatibility entry point for `python main.py` and tests
+  that import the historical module.
+- `dispatcher/config.py` owns CLI argument parsing and environment defaults.
+- `dispatcher/github.py`, `dispatcher/state.py`, and `dispatcher/pipeline.py`
+  own issue polling, persisted state, and orchestration flow.
+- `dispatcher/runners.py` owns provider-specific Gemini, Claude, and Codex
+  subprocess commands.
+- `dispatcher/git.py` and `dispatcher/prompts.py` hold worktree/Git helpers and
+  prompt templating.

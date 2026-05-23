@@ -115,7 +115,7 @@ class DispatcherTests(unittest.TestCase):
             config = self.make_config(root, dry_run=False)
             store = main.StateStore(config.paths.state_file)
 
-            with patch("main.run_stage") as run_stage:
+            with patch("dispatcher.pipeline.run_stage") as run_stage:
                 with self.assertRaisesRegex(
                     RuntimeError, "without creating the expected worktree directory"
                 ):
@@ -188,11 +188,36 @@ class DispatcherTests(unittest.TestCase):
                 (dispatcher_dir / ".dispatcher" / "logs").resolve(),
             )
 
+    def test_build_config_defaults_to_sibling_repo_from_dispatcher_worktree(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dispatcher_main = Path(temp_dir) / "dispatcher" / "main"
+            dispatcher_main.mkdir(parents=True)
+            with patch("pathlib.Path.cwd", return_value=dispatcher_main):
+                config = main.build_config(["--repo", "owner/target-repo"])
+
+            repo_root = (Path(temp_dir) / "target-repo").resolve()
+            self.assertEqual(config.paths.project_dir, repo_root / "main")
+            self.assertEqual(config.paths.worktree_root, repo_root)
+            self.assertEqual(
+                main.worktree_path_for_issue(config, main.Issue(8, "Task", "url")),
+                repo_root / "feat" / "issue-8",
+            )
+            self.assertEqual(
+                config.paths.state_file,
+                (dispatcher_main / ".dispatcher" / "state.json").resolve(),
+            )
+            self.assertEqual(
+                config.paths.log_dir,
+                (dispatcher_main / ".dispatcher" / "logs").resolve(),
+            )
+
     def test_list_triggered_issues_uses_gh_cli_json(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             config = self.make_config(root)
-            with patch("main.run_json") as run_json:
+            with patch("dispatcher.github.run_json") as run_json:
                 run_json.return_value = [
                     {"number": 3, "title": "Ship it", "url": "https://example.test/3"}
                 ]
