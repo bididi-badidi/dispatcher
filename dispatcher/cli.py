@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 import time
 from collections.abc import Callable
@@ -48,11 +49,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _run_daemon(config: Config, store: StateStore) -> int:
-    import asyncio
-
     from dispatcher.queue import Dispatcher
 
-    asyncio.run(Dispatcher(config, store).run())
+    try:
+        asyncio.run(Dispatcher(config, store).run())
+    except KeyboardInterrupt:
+        print("Stopping dispatcher daemon.")
+        return 130
     return 0
 
 

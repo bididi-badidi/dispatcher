@@ -88,3 +88,11 @@ class ConfigTests(unittest.TestCase):
 
             self.assertTrue(config.daemon)
             self.assertEqual(config.max_workers, 5)
+
+    def test_once_and_daemon_modes_are_mutually_exclusive(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dispatcher_dir = Path(temp_dir) / "dispatcher"
+            dispatcher_dir.mkdir()
+            with patch("pathlib.Path.cwd", return_value=dispatcher_dir):
+                with self.assertRaises(SystemExit):
+                    build_config(["--repo", "owner/target-repo", "--once", "--daemon"])

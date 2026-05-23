@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import main as legacy_main
-from dispatcher.cli import main, run_polling_loop
+from dispatcher.cli import _run_daemon, main, run_polling_loop
 from dispatcher.state import StateStore
 from tests.helpers import make_config
 
@@ -25,6 +25,21 @@ class CliTests(unittest.TestCase):
             self.assertEqual(result, 0)
             self.assertEqual(run_daemon.call_count, 1)
             self.assertIs(legacy_main.main, main)
+
+    def test_daemon_returns_keyboard_interrupt_exit_code(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config = make_config(root)
+            store = StateStore(config.paths.state_file)
+
+            with (
+                patch("dispatcher.queue.Dispatcher.run", side_effect=KeyboardInterrupt),
+                patch("builtins.print") as print_,
+            ):
+                result = _run_daemon(config, store)
+
+            self.assertEqual(result, 130)
+            print_.assert_called_once_with("Stopping dispatcher daemon.")
 
     def test_polling_loop_repeats_after_interval(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

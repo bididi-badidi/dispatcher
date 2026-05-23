@@ -97,12 +97,13 @@ def build_config(argv: Sequence[str] | None = None) -> Config:
         ),
         help="Seconds to wait between polling cycles. Defaults to 120.",
     )
-    parser.add_argument(
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
         "--once",
         action="store_true",
         help="Run one polling cycle and exit instead of long polling.",
     )
-    parser.add_argument(
+    mode_group.add_argument(
         "--daemon",
         action="store_true",
         help="Run as an async daemon with a concurrent worker queue.",

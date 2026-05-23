@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import locale
 import shlex
 from pathlib import Path
 
@@ -49,11 +50,12 @@ async def async_run_stage(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
+    encoding = locale.getpreferredencoding(False)
     stdout, stderr = await proc.communicate(
-        input=stdin_text.encode() if stdin_text is not None else None
+        input=stdin_text.encode(encoding) if stdin_text is not None else None
     )
-    stdout_text = stdout.decode(errors="replace")
-    stderr_text = stderr.decode(errors="replace")
+    stdout_text = stdout.decode(encoding, errors="replace")
+    stderr_text = stderr.decode(encoding, errors="replace")
     log_path.write_text(
         f"$ {command_text}{stdin_log}\n\n[version]\n{version}\n\n[stdout]\n"
         f"{stdout_text}\n\n[stderr]\n{stderr_text}",

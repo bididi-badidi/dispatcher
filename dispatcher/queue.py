@@ -137,7 +137,9 @@ class Dispatcher:
         return True
 
     def snapshot(self) -> QueueSnapshot:
-        # asyncio.Queue intentionally has no public pending-items snapshot API.
+        # Compatibility note: asyncio.Queue has no public API for enumerating
+        # pending items. Snapshot is diagnostic/test-only, so keep the private
+        # access isolated here instead of spreading Queue internals elsewhere.
         pending = tuple(
             task
             for task in list(self._queue._queue)  # type: ignore[attr-defined]
