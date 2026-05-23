@@ -8,6 +8,12 @@
 - `IssueState` gained nullable review/iteration/PR fields, so existing state records can still hydrate through dataclass defaults.
 - `uv` needs `UV_CACHE_DIR=/private/tmp/uv-cache-issue-3` in this sandbox because `/Users/user/.cache/uv` is not writable here.
 
+## Session note (2026-05-23)
+
+- GitHub issue #3 (`feat: integrate LangGraph for agentic multi-stage workflow with review loop`) is implemented on `feat/issue-3`.
+- Branch plan at `.ai/assets/branches/feat/issue-3/plan.md` is the authoritative implementation plan for this branch.
+- Local validation passed with `uv run ruff format .`, `uv run ruff check . --fix`, and `uv run pytest` using `UV_CACHE_DIR=/private/tmp/uv-cache-issue-3`.
+
 ## Stable project context
 
 - Runner defaults verified against official CLI versions on 2026-05-21:
