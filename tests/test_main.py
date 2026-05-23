@@ -13,9 +13,11 @@ import main
 
 
 class DispatcherTests(unittest.TestCase):
-    def make_config(self, root: Path, *, dry_run: bool = True) -> main.Config:
+    def make_config(
+        self, root: Path, *, dry_run: bool = True, repo: str = "example/repo"
+    ) -> main.Config:
         return main.Config(
-            repo="example/repo",
+            repo=repo,
             label="automate",
             base_branch="main",
             branch_prefix="feat/issue-",
@@ -38,6 +40,7 @@ class DispatcherTests(unittest.TestCase):
             root = Path(temp_dir)
             store = main.StateStore(root / "state.json")
             store.upsert(
+                "example/repo",
                 main.IssueState(
                     number=1,
                     title="Started",
@@ -46,24 +49,83 @@ class DispatcherTests(unittest.TestCase):
                     branch="feat/issue-1",
                     worktree="/tmp/one",
                     updated_at=main.utc_now(),
-                )
+                ),
             )
             issue = main.first_unstarted_issue(
                 [
                     main.Issue(1, "Started", "https://example.test/1"),
                     main.Issue(2, "New", "https://example.test/2"),
                 ],
+                "example/repo",
                 store,
             )
             self.assertIsNotNone(issue)
             self.assertEqual(issue.number, 2)
 
+    def test_first_unstarted_issue_scopes_issue_numbers_to_repo(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = main.StateStore(root / "state.json")
+            store.upsert(
+                "example/one",
+                main.IssueState(
+                    number=1,
+                    title="Started",
+                    url="https://example.test/one/1",
+                    status="started",
+                    branch="feat/issue-1",
+                    worktree="/tmp/one",
+                    updated_at=main.utc_now(),
+                ),
+            )
+
+            issue = main.first_unstarted_issue(
+                [main.Issue(1, "Same number", "https://example.test/two/1")],
+                "example/two",
+                store,
+            )
+
+            self.assertIsNotNone(issue)
+            self.assertEqual(issue.number, 1)
+            store.upsert(
+                "example/two",
+                main.IssueState(
+                    number=1,
+                    title=issue.title,
+                    url=issue.url,
+                    status="started",
+                    branch="feat/issue-1",
+                    worktree="/tmp/two",
+                    updated_at=main.utc_now(),
+                ),
+            )
+            self.assertEqual(store.get("example/one", 1)["worktree"], "/tmp/one")
+            self.assertEqual(store.get("example/two", 1)["worktree"], "/tmp/two")
+
     def test_default_worktree_prompt_is_minimal(self) -> None:
         self.assertEqual(
             main.default_worktree_command(),
             "Create a git worktree for GitHub issue #$issue_number "
-            "($issue_title) based on main.",
+            "($issue_title) based on $base_branch at $worktree using branch $branch.",
         )
+
+    def test_pipeline_reports_missing_expected_worktree_after_stage(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config = self.make_config(root, dry_run=False)
+            store = main.StateStore(config.paths.state_file)
+
+            with patch("main.run_stage") as run_stage:
+                with self.assertRaisesRegex(
+                    RuntimeError, "without creating the expected worktree directory"
+                ):
+                    main.run_pipeline(
+                        main.Issue(1, "Missing worktree", "https://example.test/1"),
+                        config,
+                        store,
+                    )
+
+            self.assertEqual(run_stage.call_count, 1)
 
     def test_dry_run_pipeline_records_state_and_stage_logs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -92,14 +154,16 @@ class DispatcherTests(unittest.TestCase):
 
             self.assertEqual(state.status, "built")
             saved = json.loads(config.paths.state_file.read_text(encoding="utf-8"))
-            self.assertEqual(saved["issues"]["7"]["branch"], "feat/issue-7")
+            saved_issue = saved["repositories"]["example/repo"]["issues"]["7"]
+            self.assertEqual(saved_issue["branch"], "feat/issue-7")
             self.assertEqual(
-                saved["issues"]["7"]["worktree"],
+                saved_issue["worktree"],
                 str(repo_root / "feat" / "issue-7"),
             )
-            self.assertTrue((config.paths.log_dir / "issue-7-worktree.log").exists())
-            self.assertTrue((config.paths.log_dir / "issue-7-plan.log").exists())
-            self.assertTrue((config.paths.log_dir / "issue-7-build.log").exists())
+            repo_log_dir = config.paths.log_dir / "example" / "repo"
+            self.assertTrue((repo_log_dir / "issue-7-worktree.log").exists())
+            self.assertTrue((repo_log_dir / "issue-7-plan.log").exists())
+            self.assertTrue((repo_log_dir / "issue-7-build.log").exists())
 
     def test_build_config_defaults_to_repo_main_checkout(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -141,6 +205,56 @@ class DispatcherTests(unittest.TestCase):
             command = run_json.call_args.args[0]
             self.assertIn("--label", command)
             self.assertIn("automate", command)
+
+    def test_run_json_prints_cli_command_to_stdout(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            completed = main.subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="[]", stderr=""
+            )
+
+            with (
+                patch("builtins.print") as print_,
+                patch("main.subprocess.run", return_value=completed),
+            ):
+                payload = main.run_json(["gh", "issue", "list", "open items"], root)
+
+            self.assertEqual(payload, [])
+            print_.assert_called_once_with("$ gh issue list 'open items'")
+
+    def test_agent_runner_prints_version_and_launch_commands_to_stdout(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            worktree = Path(temp_dir)
+            (worktree / ".git").mkdir()
+            config = self.make_config(worktree, dry_run=False)
+            runner = main.CodexRunner("build $issue_number")
+            version = main.subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="codex-cli 1.0", stderr=""
+            )
+            run = main.subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="", stderr=""
+            )
+
+            with (
+                patch("builtins.print") as print_,
+                patch("main.subprocess.run", side_effect=[version, run]),
+            ):
+                runner.run(
+                    main.Issue(2, "Build", "https://example.test/2"),
+                    config,
+                    worktree,
+                    "feat/issue-2",
+                )
+
+            self.assertEqual(
+                [call.args[0] for call in print_.call_args_list],
+                [
+                    "$ codex --version",
+                    "$ codex exec --sandbox workspace-write --config "
+                    "sandbox_workspace_write.network_access=true "
+                    f"--cd {worktree} 'build 2'",
+                ],
+            )
 
     def test_stage_runners_use_provider_specific_safe_permissions(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -212,6 +326,17 @@ class DispatcherTests(unittest.TestCase):
             self.assertEqual(
                 codex[:4], ["codex", "exec", "--sandbox", "workspace-write"]
             )
+            codex_configs = [
+                codex[index + 1]
+                for index, value in enumerate(codex[:-1])
+                if value == "--config"
+            ]
+            self.assertIn("sandbox_workspace_write.network_access=true", codex_configs)
+            self.assertEqual(
+                codex_configs[1],
+                "sandbox_workspace_write.writable_roots="
+                f'["{git_dir.resolve()}", "{(root / "main" / ".git").resolve()}"]',
+            )
             codex_add_dirs = [
                 codex[index + 1]
                 for index, value in enumerate(codex[:-1])
@@ -276,7 +401,9 @@ class DispatcherTests(unittest.TestCase):
             prompt,
             "Read the implementation plan from the branch assets for GitHub "
             "issue #$issue_number. implement it, run relevant checks, push "
-            "commit to remote, and open a draft PR. Stop after PR creation.",
+            "commit to remote, and open a PR with the configured GitHub MCP "
+            "when it is available. Do not require the gh CLI for PR creation. "
+            "Stop after PR creation.",
         )
         self.assertNotIn("$branch", prompt)
 

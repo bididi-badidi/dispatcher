@@ -5,7 +5,7 @@ Local issue-triggered automation dispatcher for the Phase 1 happy path in
 
 The dispatcher polls GitHub for one open issue with the trigger label, records
 state locally, runs the three planned agent stages in sequence, and stops after
-the build stage opens a draft PR.
+the build stage opens a PR.
 
 ## Usage
 
@@ -23,9 +23,13 @@ Useful options:
 - Dispatcher state and logs stay under the dispatcher directory by default.
 - `--dry-run` writes the stage commands to `.dispatcher/logs/` without running
   Gemini, Claude, or Codex.
+- The worktree stage must create the path selected by the dispatcher before
+  planning can start.
 
-The generated state file defaults to `.dispatcher/state.json`; logs default to
-`.dispatcher/logs/`.
+The generated state file defaults to `.dispatcher/state.json`; issue records
+are grouped by repository so `OWNER/REPO#7` does not collide with another
+repository's issue `#7`. Logs default to `.dispatcher/logs/` and use matching
+repository subdirectories.
 
 ## Stage Prompts
 
@@ -42,6 +46,10 @@ uv run python main.py --repo OWNER/REPO
 Available template variables include `$issue_number`, `$issue_title`,
 `$issue_url`, `$repo`, `$project_dir`, `$worktree`, `$branch`, and
 `$base_branch`.
+
+The default build prompt tells Codex to use its configured GitHub MCP for PR
+creation when available and not to require `gh` for that step. Git still
+publishes the local branch before the PR is opened.
 
 The default runners use:
 
@@ -60,10 +68,14 @@ The default runners use:
   commands, read-only `gh` commands, and writes under `.ai/assets/branches/`;
   mutating `gh` commands and destructive shell commands such as `rm`, hard
   resets, forced pushes, and delete-style commands are explicitly denied.
-- Codex: `codex exec --sandbox workspace-write --add-dir <git-dir> --cd <worktree>`.
-  For linked worktrees, the runner reads the worktree `.git` metadata and adds
+- Codex: `codex exec --sandbox workspace-write --config sandbox_workspace_write.network_access=true --config sandbox_workspace_write.writable_roots=[...] --add-dir <git-dir> --cd <worktree>`.
+  For linked worktrees, the runner reads the worktree `.git` metadata and grants
   both its per-worktree Git admin directory and shared Git directory when they
-  sit outside Codex's writable workspace root.
+  sit outside Codex's writable workspace root. It passes those roots through
+  both the Codex workspace-write config and `--add-dir` so linked-worktree Git
+  index and ref updates can write their admin metadata. Network access stays
+  enabled for the build stage because Codex is expected to push its branch and
+  open a PR.
 
 The dispatcher rejects yolo or dangerous skip/bypass flags before launching any
 agent subprocess.

@@ -180,7 +180,7 @@ class StateStore:
 
     def load(self) -> dict[str, Any]:
         if not self.path.exists():
-            return {"issues": {}}
+            return {"repositories": {}}
         with self.path.open(encoding="utf-8") as handle:
             return json.load(handle)
 
@@ -190,12 +190,14 @@ class StateStore:
             json.dump(data, handle, indent=2, sort_keys=True)
             handle.write("\n")
 
-    def get(self, issue_number: int) -> dict[str, Any] | None:
-        return self.load()["issues"].get(str(issue_number))
+    def get(self, repo: str, issue_number: int) -> dict[str, Any] | None:
+        repositories = self.load().get("repositories", {})
+        return repositories.get(repo, {}).get("issues", {}).get(str(issue_number))
 
-    def upsert(self, state: IssueState) -> None:
+    def upsert(self, repo: str, state: IssueState) -> None:
         data = self.load()
-        data.setdefault("issues", {})[str(state.number)] = asdict(state)
+        repository = data.setdefault("repositories", {}).setdefault(repo, {})
+        repository.setdefault("issues", {})[str(state.number)] = asdict(state)
         self.save(data)
 
 
@@ -203,7 +205,12 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def print_subprocess_command(command: Sequence[str]) -> None:
+    print(f"$ {shlex.join(command)}")
+
+
 def run_json(command: Sequence[str], cwd: Path) -> Any:
+    print_subprocess_command(command)
     completed = subprocess.run(
         command,
         cwd=cwd,
@@ -263,7 +270,7 @@ def render_template(
 def default_worktree_command() -> str:
     return (
         "Create a git worktree for GitHub issue #$issue_number "
-        "($issue_title) based on main."
+        "($issue_title) based on $base_branch at $worktree using branch $branch."
     )
 
 
@@ -279,7 +286,9 @@ def default_build_command() -> str:
     return (
         "Read the implementation plan from the branch assets for GitHub issue "
         "#$issue_number. implement it, run relevant checks, push commit to "
-        "remote, and open a draft PR. Stop after PR creation."
+        "remote, and open a PR with the configured GitHub MCP when it is "
+        "available. Do not require the gh CLI for PR creation. Stop after PR "
+        "creation."
     )
 
 
@@ -354,8 +363,10 @@ class AgentRunner(ABC):
 
     def version(self) -> str:
         try:
+            command = [self.executable, *self.version_args]
+            print_subprocess_command(command)
             completed = subprocess.run(
-                [self.executable, *self.version_args],
+                command,
                 check=False,
                 text=True,
                 capture_output=True,
@@ -373,8 +384,9 @@ class AgentRunner(ABC):
         command = self.command(prompt, cwd)
         self._validate_command(command)
 
-        config.paths.log_dir.mkdir(parents=True, exist_ok=True)
-        log_path = config.paths.log_dir / f"issue-{issue.number}-{self.stage_name}.log"
+        repo_log_dir = config.paths.log_dir / config.repo
+        repo_log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = repo_log_dir / f"issue-{issue.number}-{self.stage_name}.log"
         version = self.version()
         command_text = shlex.join(command)
         stdin_text = self.stdin(prompt)
@@ -387,6 +399,7 @@ class AgentRunner(ABC):
             )
             return
 
+        print_subprocess_command(command)
         completed = subprocess.run(
             command,
             cwd=cwd,
@@ -477,8 +490,19 @@ class CodexRunner(AgentRunner):
             "exec",
             "--sandbox",
             "workspace-write",
+            "--config",
+            "sandbox_workspace_write.network_access=true",
         ]
-        for git_write_dir in codex_git_write_dirs(cwd):
+        git_write_dirs = codex_git_write_dirs(cwd)
+        if git_write_dirs:
+            command.extend(
+                [
+                    "--config",
+                    "sandbox_workspace_write.writable_roots="
+                    f"{json.dumps([str(path) for path in git_write_dirs])}",
+                ]
+            )
+        for git_write_dir in git_write_dirs:
             command.extend(["--add-dir", str(git_write_dir)])
         command.extend(
             [
@@ -519,8 +543,16 @@ def branch_for_issue(config: Config, issue: Issue) -> str:
     return f"{config.branch_prefix}{issue.number}"
 
 
+def require_worktree_path(worktree: Path) -> None:
+    if not worktree.is_dir():
+        raise RuntimeError(
+            "worktree stage completed without creating the expected worktree "
+            f"directory: {worktree}"
+        )
+
+
 def run_pipeline(issue: Issue, config: Config, store: StateStore) -> IssueState:
-    existing = store.get(issue.number)
+    existing = store.get(config.repo, issue.number)
     if existing and existing.get("status") in {"started", "planned", "built", "failed"}:
         return IssueState(**existing)
 
@@ -536,36 +568,40 @@ def run_pipeline(issue: Issue, config: Config, store: StateStore) -> IssueState:
         worktree=str(worktree),
         updated_at=utc_now(),
     )
-    store.upsert(state)
+    store.upsert(config.repo, state)
 
     try:
         run_stage("worktree", runners["worktree"], issue, config, worktree, branch)
+        if not config.dry_run:
+            require_worktree_path(worktree)
         state.status = "worktree_created"
         state.updated_at = utc_now()
-        store.upsert(state)
+        store.upsert(config.repo, state)
 
         run_stage("plan", runners["plan"], issue, config, worktree, branch)
         state.status = "planned"
         state.updated_at = utc_now()
-        store.upsert(state)
+        store.upsert(config.repo, state)
 
         run_stage("build", runners["build"], issue, config, worktree, branch)
         state.status = "built"
         state.updated_at = utc_now()
-        store.upsert(state)
+        store.upsert(config.repo, state)
     except Exception as exc:
         state.status = "failed"
         state.error = str(exc)
         state.updated_at = utc_now()
-        store.upsert(state)
+        store.upsert(config.repo, state)
         raise
 
     return state
 
 
-def first_unstarted_issue(issues: Sequence[Issue], store: StateStore) -> Issue | None:
+def first_unstarted_issue(
+    issues: Sequence[Issue], repo: str, store: StateStore
+) -> Issue | None:
     for issue in issues:
-        existing = store.get(issue.number)
+        existing = store.get(repo, issue.number)
         if not existing:
             return issue
     return None
@@ -666,7 +702,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     config = build_config(argv)
     store = StateStore(config.paths.state_file)
     issues = list_triggered_issues(config)
-    issue = first_unstarted_issue(issues, store)
+    issue = first_unstarted_issue(issues, config.repo, store)
     if issue is None:
         print(f"No new open issues with label {config.label!r} in {config.repo}.")
         return 0
