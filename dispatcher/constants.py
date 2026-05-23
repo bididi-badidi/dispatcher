@@ -74,6 +74,19 @@ CLAUDE_PLAN_ALLOWED_TOOLS = (
     "Bash(pwd)",
 )
 
+CLAUDE_REVIEW_ALLOWED_TOOLS = (
+    "Read",
+    "Glob",
+    "Grep",
+    "Bash(git diff *)",
+    "Bash(git log *)",
+    "Bash(git ls-files *)",
+    "Bash(git status *)",
+    "Bash(find *)",
+    "Bash(ls *)",
+    "Bash(pwd)",
+)
+
 CLAUDE_PLAN_DISALLOWED_TOOLS = (
     "Bash(chmod *)",
     "Bash(chown *)",

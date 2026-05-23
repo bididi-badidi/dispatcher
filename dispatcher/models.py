@@ -53,3 +53,10 @@ class IssueState:
     error: str | None = None
     task_type: str = "fresh"
     worker_id: int | None = None
+    build_iteration: int = 0
+    build_feedback: str | None = None
+    plan_review: str | None = None
+    plan_review_feedback: str | None = None
+    quality_review: str | None = None
+    quality_review_feedback: str | None = None
+    pr_url: str | None = None

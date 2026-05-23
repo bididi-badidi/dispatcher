@@ -6,8 +6,8 @@ import signal
 import sys
 from dataclasses import dataclass
 
-from dispatcher.async_pipeline import async_run_pipeline
 from dispatcher.github import list_triggered_issues
+from dispatcher.langgraph_pipeline import async_run_langgraph_pipeline
 from dispatcher.models import Config, Issue
 from dispatcher.state import StateStore
 
@@ -108,7 +108,7 @@ class Dispatcher:
 
             self._active[worker_id] = task
             try:
-                await async_run_pipeline(
+                await async_run_langgraph_pipeline(
                     task, self.config, self.store, worker_id, self._shutdown
                 )
                 self._completed_count += 1

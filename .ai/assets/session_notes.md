@@ -2,16 +2,11 @@
 
 ## Current context
 
-- The async worker queue review items from 2026-05-23 have been addressed.
-- Fresh issue polling still treats any existing state record as terminal,
-  including `failed`; this matches current behavior and is now documented in
-  `README.md`. Retrying a failed issue currently requires clearing or editing
-  its `.dispatcher/state.json` entry.
-- Review requeue scaffolding intentionally allows an issue with existing
-  completed state to be queued as a review task, while fresh issue polling skips
-  any existing state record.
-- Tests are organized by dispatcher component under `tests/test_*.py`, with
-  shared fixtures in `tests/helpers.py` and path setup in `tests/conftest.py`.
+- Issue #3 is implemented on `feat/issue-3`.
+- Daemon workers now call `dispatcher.langgraph_pipeline.async_run_langgraph_pipeline`.
+- The legacy linear `dispatcher/pipeline.py` and `dispatcher/async_pipeline.py` modules remain for compatibility; queue daemon mode uses the LangGraph path.
+- `IssueState` gained nullable review/iteration/PR fields, so existing state records can still hydrate through dataclass defaults.
+- `uv` needs `UV_CACHE_DIR=/private/tmp/uv-cache-issue-3` in this sandbox because `/Users/user/.cache/uv` is not writable here.
 
 ## Stable project context
 
@@ -30,3 +25,9 @@
 - CLI long-polls every 120 seconds; `--poll-interval` or
   `DISPATCHER_POLL_INTERVAL_SECONDS` overrides it. `--once` forces a single
   synchronous cycle, and `--daemon` uses the async worker queue.
+- Fresh issue polling skips any existing state record (including `failed`);
+  retrying a failed issue requires clearing/editing `.dispatcher/state.json`.
+  Review requeue scaffolding intentionally allows re-queuing an issue with
+  existing completed state as a review task.
+- Tests are organized by dispatcher component under `tests/test_*.py`, with
+  shared fixtures in `tests/helpers.py` and path setup in `tests/conftest.py`.
