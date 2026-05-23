@@ -1,9 +1,32 @@
 # Session Handover Notes
 
-- Current runner defaults were checked against official docs on 2026-05-21. Installed local CLI versions observed: `codex-cli 0.130.0`, `Claude Code 2.1.98`, `gemini 0.38.2`.
-- The dispatcher intentionally rejects `--yolo`, `--full-auto`, and dangerous skip/bypass permission flags before launching agent subprocesses.
-- Claude planning permissions now follow the official permission-rule syntax, pre-approve only read/planning operations, read-only `gh` commands, and writes under `.ai/assets/branches/`. They explicitly deny mutating `gh` commands and destructive shell commands in the runner flags; project `.claude/settings.json` also denies destructive shell commands.
-- State records now live under `repositories[owner/name].issues[number]`, and logs mirror the repo path under `.dispatcher/logs/`. Legacy top-level `issues` state is not used for dispatching because it cannot reliably identify the source repository.
-- A 2026-05-22 run for `bididi-badidi/testing-coding-assistant#1` exposed a worktree contract mismatch: dispatcher default branch `feat/issue-1` implied `/Users/user/Projects/testing-coding-assistant/feat/issue-1`, while Gemini prepared existing `fix/issue-1`. The default prompt now names the expected branch/path, and the pipeline validates the path before starting plan/build stages.
-- A 2026-05-23 fix made default repo path resolution aware of branch-style dispatcher checkouts. Running the dispatcher from `/Users/user/Projects/dispatcher/main` now targets sibling repositories such as `/Users/user/Projects/testing-coding-assistant/main`, not `/Users/user/Projects/dispatcher/testing-coding-assistant/main`.
-- `main.py` is now intentionally a compatibility wrapper over the modular `dispatcher/` package; patch internal dependencies in tests at their owning modules, for example `dispatcher.pipeline.run_stage`.
+## Current context
+
+- The async worker queue review items from 2026-05-23 have been addressed.
+- Fresh issue polling still treats any existing state record as terminal,
+  including `failed`; this matches current behavior and is now documented in
+  `README.md`. Retrying a failed issue currently requires clearing or editing
+  its `.dispatcher/state.json` entry.
+- Review requeue scaffolding intentionally allows an issue with existing
+  completed state to be queued as a review task, while fresh issue polling skips
+  any existing state record.
+- Tests are organized by dispatcher component under `tests/test_*.py`, with
+  shared fixtures in `tests/helpers.py` and path setup in `tests/conftest.py`.
+
+## Stable project context
+
+- Runner defaults verified against official CLI versions on 2026-05-21:
+  codex-cli 0.130.0, Claude Code 2.1.98, gemini 0.38.2.
+- Dispatcher intentionally rejects `--yolo`, `--full-auto`, and dangerous
+  skip/bypass permission flags.
+- State records live under `repositories[owner/name].issues[number]`; logs
+  mirror repo path under `.dispatcher/logs/`.
+- Worktree contract mismatch (2026-05-22): default prompt names the expected
+  branch/path and pipelines validate the path before plan/build stages.
+- Default repo path resolution is aware of branch-style dispatcher checkouts
+  (sibling repos).
+- `main.py` is a compatibility wrapper; patch internal dependencies in tests at
+  their owning modules, such as `dispatcher.pipeline.run_stage`.
+- CLI long-polls every 120 seconds; `--poll-interval` or
+  `DISPATCHER_POLL_INTERVAL_SECONDS` overrides it. `--once` forces a single
+  synchronous cycle, and `--daemon` uses the async worker queue.
