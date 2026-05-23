@@ -3,9 +3,9 @@
 Local issue-triggered automation dispatcher for the Phase 1 happy path in
 [`.ai/assets/PLAN.md`](.ai/assets/PLAN.md).
 
-The dispatcher polls GitHub for one open issue with the trigger label, records
-state locally, runs the three planned agent stages in sequence, and stops after
-the build stage opens a PR.
+The dispatcher long-polls GitHub for open issues with the trigger label,
+records state locally, runs the three planned agent stages in sequence, and
+stops each issue after the build stage opens a PR.
 
 ## Usage
 
@@ -18,9 +18,15 @@ Useful options:
 - `--label automate` chooses the trigger label.
 - `--base-branch main` chooses the branch used for the worktree.
 - The base checkout defaults to `/Projects/{repo_name}/main` when the
-  dispatcher is run from `/Projects/dispatcher`.
+  dispatcher is run from `/Projects/dispatcher` or `/Projects/dispatcher/main`.
 - New worktrees default to `/Projects/{repo_name}/{branch_name}`.
 - Dispatcher state and logs stay under the dispatcher directory by default.
+- `--poll-interval 120` chooses the delay between polling cycles, in seconds.
+  It can also be set with `DISPATCHER_POLL_INTERVAL_SECONDS`.
+- `--once` runs a single polling cycle and exits.
+- `--daemon` runs the async worker queue instead of the simple long-polling
+  loop.
+- `--max-workers 3` sets the daemon worker count.
 - `--dry-run` writes the stage commands to `.dispatcher/logs/` without running
   Gemini, Claude, or Codex.
 - The worktree stage must create the path selected by the dispatcher before
@@ -30,6 +36,22 @@ The generated state file defaults to `.dispatcher/state.json`; issue records
 are grouped by repository so `OWNER/REPO#7` does not collide with another
 repository's issue `#7`. Logs default to `.dispatcher/logs/` and use matching
 repository subdirectories.
+
+By default the process keeps running and polls every 120 seconds. A failed
+polling cycle is printed to stderr, then the dispatcher waits for the next
+interval and tries again. Press Ctrl-C to stop the process.
+
+Daemon mode keeps the same polling source and stage runners, but enqueues
+unseen issues into an `asyncio` worker pool so multiple issue pipelines can run
+at the same time:
+
+```bash
+uv run python main.py --repo OWNER/REPO --daemon --max-workers 3
+```
+
+Issue state is terminal once a record exists, including `failed` records. The
+poller will not automatically retry failed issues; clear or edit the relevant
+entry in `.dispatcher/state.json` before reprocessing an issue.
 
 ## Stage Prompts
 
@@ -87,3 +109,18 @@ uv run ruff format .
 uv run ruff check .
 uv run pytest
 ```
+
+## Code Layout
+
+- `main.py` is a thin compatibility entry point for `python main.py` and tests
+  that import the historical module.
+- `dispatcher/config.py` owns CLI argument parsing and environment defaults.
+- `dispatcher/github.py`, `dispatcher/state.py`, and `dispatcher/pipeline.py`
+  own issue polling, persisted state, and orchestration flow.
+- `dispatcher/queue.py`, `dispatcher/async_pipeline.py`, and
+  `dispatcher/async_runners.py` own daemon-mode queueing and non-blocking
+  subprocess execution.
+- `dispatcher/runners.py` owns provider-specific Gemini, Claude, and Codex
+  subprocess commands.
+- `dispatcher/git.py` and `dispatcher/prompts.py` hold worktree/Git helpers and
+  prompt templating.
