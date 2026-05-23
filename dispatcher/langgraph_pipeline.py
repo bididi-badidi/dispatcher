@@ -288,9 +288,12 @@ def _build_graph(
             state["branch"],
         )
         match = _PR_URL_RE.search(output)
+        pr_url = match.group(0) if match else state.get("pr_url")
+        if not pr_url:
+            raise RuntimeError("open_pr stage did not print a GitHub PR URL")
         updates = {
             "status": "pr_opened",
-            "pr_url": match.group(0) if match else state.get("pr_url"),
+            "pr_url": pr_url,
             "worker_id": None,
             "error": None,
         }
