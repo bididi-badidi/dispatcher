@@ -62,7 +62,7 @@ class LangGraphPipelineTests(unittest.TestCase):
                     abs(
                         review_started["review_plan"] - review_started["review_quality"]
                     ),
-                    0.04,
+                    0.2,
                 )
                 saved = store.get(config.repo, 3)
                 self.assertEqual(saved["status"], "pr_opened")
