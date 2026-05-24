@@ -32,16 +32,13 @@ gitignored.
 
 ## Branching Strategy
 
-Use short-lived feature branches and promote changes through `dev` before
-`main`:
+Use short-lived feature branches and open pull requests directly to `main`:
 
 ```text
-feature/* -> dev -> main
+feature/* -> main
 ```
 
-- Open feature, fix, chore, and CI branches against `dev`.
-- Open release promotion pull requests from `dev` to `main`.
-- Do not open pull requests from feature branches directly to `main`.
+- Open feature, fix, chore, and CI branches against `main`.
 - Use conventional commit style for commit messages and pull request titles,
   for example `ci: add pull request checks`.
 
@@ -60,16 +57,6 @@ the first green CI run is available.
 For `main`:
 
 - Require a pull request before merging.
-- Require status checks for `lint / python 3.11`, `test / python 3.11`, and
-  `require dev source for main`.
+- Require status checks for `lint / python 3.11` and `test / python 3.11`.
 - Dismiss stale reviews when new commits are pushed.
 - Restrict direct pushes for non-admin users.
-
-For `dev`:
-
-- Require a pull request before merging.
-- Require status checks for `lint / python 3.11` and `test / python 3.11`.
-- Optionally require one approving review.
-
-The Branch Gate workflow enforces the promotion rule that pull requests
-targeting `main` must come from `dev`.
