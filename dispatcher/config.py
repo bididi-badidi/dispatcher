@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 from pathlib import Path
 from typing import Sequence
 
@@ -21,6 +22,8 @@ from dispatcher.prompts import (
     default_worktree_command,
 )
 
+ENV_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
 
 def positive_float(value: str) -> float:
     parsed = float(value)
@@ -36,7 +39,56 @@ def positive_int(value: str) -> int:
     return parsed
 
 
+def load_env_file(path: Path | None = None) -> None:
+    env_path = path or Path.cwd() / ".env"
+    if not env_path.is_file():
+        return
+
+    for line in env_path.read_text().splitlines():
+        key_value = _parse_env_line(line)
+        if key_value is None:
+            continue
+
+        key, value = key_value
+        os.environ.setdefault(key, value)
+
+
+def _parse_env_line(line: str) -> tuple[str, str] | None:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        return None
+
+    if stripped.startswith("export "):
+        stripped = stripped[len("export ") :].lstrip()
+
+    key, separator, raw_value = stripped.partition("=")
+    key = key.strip()
+    if separator == "" or not ENV_KEY_PATTERN.match(key):
+        return None
+
+    return key, _parse_env_value(raw_value.strip())
+
+
+def _parse_env_value(raw_value: str) -> str:
+    if raw_value.startswith(("'", '"')):
+        quote = raw_value[0]
+        closing_index = raw_value.find(quote, 1)
+        if closing_index != -1:
+            return raw_value[1:closing_index]
+
+    return _strip_inline_comment(raw_value).strip()
+
+
+def _strip_inline_comment(value: str) -> str:
+    for index, char in enumerate(value):
+        if char == "#" and (index == 0 or value[index - 1].isspace()):
+            return value[:index]
+    return value
+
+
 def build_config(argv: Sequence[str] | None = None) -> Config:
+    load_env_file()
+
     parser = argparse.ArgumentParser(
         description="Run the local issue-triggered dispatcher happy path."
     )
