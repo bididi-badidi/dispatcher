@@ -28,6 +28,11 @@ class StateStore:
         repositories = self.load().get("repositories", {})
         return repositories.get(repo, {}).get("issues", {}).get(str(issue_number))
 
+    def list_issue_states(self, repo: str) -> list[dict[str, Any]]:
+        repositories = self.load().get("repositories", {})
+        issues = repositories.get(repo, {}).get("issues", {})
+        return [dict(state) for state in issues.values()]
+
     def upsert(self, repo: str, state: IssueState) -> None:
         data = self.load()
         repository = data.setdefault("repositories", {}).setdefault(repo, {})

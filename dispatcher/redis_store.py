@@ -32,6 +32,14 @@ class RedisStateStore:
         data = json.loads(_decode(payload))
         return dict(data)
 
+    def list_issue_states(self, repo: str) -> list[dict[str, Any]]:
+        states: list[dict[str, Any]] = []
+        for key in self._client.scan_iter(f"dispatcher:state:{repo}:*"):
+            payload = self._client.get(_decode(key))
+            if payload is not None:
+                states.append(dict(json.loads(_decode(payload))))
+        return states
+
     def upsert(self, repo: str, state: IssueState) -> None:
         self._client.set(_state_key(repo, state.number), json.dumps(asdict(state)))
 

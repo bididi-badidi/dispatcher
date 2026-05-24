@@ -62,6 +62,7 @@ class PipelineState(TypedDict, total=False):
     quality_review_feedback: str | None
     max_iterations: int
     pr_url: str | None
+    pr_review_cursor: int | None
     status: str
     error: str | None
 
@@ -103,6 +104,7 @@ async def async_run_langgraph_pipeline(
         "quality_review_feedback": None,
         "max_iterations": max_iterations,
         "pr_url": None,
+        "pr_review_cursor": None,
         "status": "started",
         "error": None,
     }
@@ -116,6 +118,7 @@ async def async_run_langgraph_pipeline(
             "quality_review_feedback"
         )
         initial_state["pr_url"] = existing.get("pr_url")
+        initial_state["pr_review_cursor"] = existing.get("pr_review_cursor")
 
     graph = _build_graph(config, store, issue, shutdown_event)
     try:
@@ -133,6 +136,7 @@ async def async_run_langgraph_pipeline(
             "quality_review",
             "quality_review_feedback",
             "pr_url",
+            "pr_review_cursor",
         ):
             if key in latest:
                 failed_state[key] = latest[key]
@@ -279,6 +283,15 @@ def _build_graph(
 
     async def open_pr(state: PipelineState) -> dict[str, object]:
         _raise_if_shutdown(shutdown_event)
+        if state.get("task_type") == "review" and state.get("pr_url"):
+            updates = {
+                "status": "pr_opened",
+                "worker_id": None,
+                "error": None,
+            }
+            _persist_state(config, store, state | updates)
+            return updates
+
         output = await async_run_stage(
             "open_pr",
             GeminiPrRunner(default_open_pr_command()),
@@ -397,6 +410,7 @@ def _persist_state(
         quality_review=state.get("quality_review"),
         quality_review_feedback=state.get("quality_review_feedback"),
         pr_url=state.get("pr_url"),
+        pr_review_cursor=state.get("pr_review_cursor"),
     )
     store.upsert(str(state["repo"]), issue_state)
     return issue_state

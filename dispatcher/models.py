@@ -65,3 +65,4 @@ class IssueState:
     quality_review: str | None = None
     quality_review_feedback: str | None = None
     pr_url: str | None = None
+    pr_review_cursor: int | None = None
