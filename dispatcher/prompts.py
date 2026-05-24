@@ -18,7 +18,7 @@ def render_template(
         "label": config.label,
         "plan_path": str(worktree / ".ai" / "assets" / "branches" / branch / "plan.md"),
         "project_dir": str(config.paths.project_dir),
-        "repo": config.repo,
+        "repo": config.repo or "",
         "worktree": str(worktree),
     }
     return Template(template).safe_substitute(values)

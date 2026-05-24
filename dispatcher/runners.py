@@ -69,6 +69,8 @@ class AgentRunner(ABC):
         command = self.command(prompt, cwd)
         self._validate_command(command)
 
+        if config.repo is None:
+            raise RuntimeError("runner requires a concrete repository")
         repo_log_dir = config.paths.log_dir / config.repo
         repo_log_dir.mkdir(parents=True, exist_ok=True)
         log_path = repo_log_dir / f"issue-{issue.number}-{self.stage_name}.log"

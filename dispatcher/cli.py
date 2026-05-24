@@ -10,27 +10,38 @@ from dispatcher.config import build_config
 from dispatcher.github import list_triggered_issues
 from dispatcher.models import Config
 from dispatcher.pipeline import first_unstarted_issue, run_pipeline
+from dispatcher.repo_context import config_for_repo
 from dispatcher.state import StateStore
+from dispatcher.state_backend import StateBackend
 
 
-def run_once(config: Config, store: StateStore) -> bool:
-    issues = list_triggered_issues(config)
-    issue = first_unstarted_issue(issues, config.repo, store)
-    if issue is None:
-        print(f"No new open issues with label {config.label!r} in {config.repo}.")
-        return False
+def run_once(config: Config, store: StateBackend) -> bool:
+    for repo in _repos_for_polling(config, store):
+        repo_config = config_for_repo(config, repo)
+        issues = list_triggered_issues(repo_config, repo)
+        issue = first_unstarted_issue(issues, repo, store)
+        if issue is None:
+            print(f"No new open issues with label {config.label!r} in {repo}.")
+            continue
 
-    state = run_pipeline(issue, config, store)
-    print(
-        f"Issue #{state.number} reached {state.status}: "
-        f"branch={state.branch} worktree={state.worktree}"
-    )
-    return True
+        state = run_pipeline(issue, repo_config, store)
+        print(
+            f"Issue #{state.number} reached {state.status}: "
+            f"branch={state.branch} worktree={state.worktree}"
+        )
+        return True
+    return False
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     config = build_config(argv)
-    store = StateStore(config.paths.state_file)
+    store: StateBackend
+    if config.redis_url:
+        from dispatcher.redis_store import RedisStateStore
+
+        store = RedisStateStore(config.redis_url)
+    else:
+        store = StateStore(config.paths.state_file)
 
     if config.once:
         run_once(config, store)
@@ -48,7 +59,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
-def _run_daemon(config: Config, store: StateStore) -> int:
+def _run_daemon(config: Config, store: StateBackend) -> int:
     from dispatcher.queue import Dispatcher
 
     try:
@@ -61,11 +72,11 @@ def _run_daemon(config: Config, store: StateStore) -> int:
 
 def run_polling_loop(
     config: Config,
-    store: StateStore,
+    store: StateBackend,
     sleep: Callable[[float], None] = time.sleep,
 ) -> None:
     print(
-        f"Polling {config.repo} for label {config.label!r} every "
+        f"Polling for label {config.label!r} every "
         f"{config.poll_interval_seconds:g} seconds. Press Ctrl-C to stop."
     )
     while True:
@@ -74,3 +85,11 @@ def run_polling_loop(
         except Exception as exc:
             print(f"Polling cycle failed: {exc}", file=sys.stderr)
         sleep(config.poll_interval_seconds)
+
+
+def _repos_for_polling(config: Config, store: StateBackend) -> list[str]:
+    if hasattr(store, "get_repos"):
+        return list(store.get_repos())  # type: ignore[attr-defined]
+    if config.repo:
+        return [config.repo]
+    return []

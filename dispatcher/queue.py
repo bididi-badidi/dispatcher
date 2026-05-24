@@ -9,7 +9,8 @@ from dataclasses import dataclass
 from dispatcher.github import list_triggered_issues
 from dispatcher.langgraph_pipeline import async_run_langgraph_pipeline
 from dispatcher.models import Config, Issue
-from dispatcher.state import StateStore
+from dispatcher.repo_context import config_for_repo
+from dispatcher.state_backend import StateBackend
 
 
 class TaskType(enum.Enum):
@@ -36,7 +37,7 @@ class Dispatcher:
     _QUEUE_PUT_TIMEOUT_SECONDS = 0.5
 
     def __init__(
-        self, config: Config, store: StateStore, max_workers: int | None = None
+        self, config: Config, store: StateBackend, max_workers: int | None = None
     ) -> None:
         self.config = config
         self.store = store
@@ -48,7 +49,7 @@ class Dispatcher:
 
         self._queue: asyncio.Queue[Task | None] = asyncio.Queue(maxsize=20)
         self._shutdown = asyncio.Event()
-        self._in_flight: set[int] = set()
+        self._in_flight: set[tuple[str, int]] = set()
         self._active: dict[int, Task | None] = {
             worker_id: None for worker_id in range(self.max_workers)
         }
@@ -58,7 +59,7 @@ class Dispatcher:
     async def run(self) -> None:
         self._install_signal_handlers()
         print(
-            f"Polling {self.config.repo} for label {self.config.label!r} every "
+            f"Polling for label {self.config.label!r} every "
             f"{self.config.poll_interval_seconds:g} seconds with "
             f"{self.max_workers} worker(s). Press Ctrl-C to stop."
         )
@@ -79,7 +80,8 @@ class Dispatcher:
     async def _poller(self) -> None:
         while not self._shutdown.is_set():
             try:
-                await self._enqueue_triggered_issues()
+                for repo in self._get_repos():
+                    await self._enqueue_triggered_issues(repo)
             except Exception as exc:
                 print(f"Polling cycle failed: {exc}", file=sys.stderr)
 
@@ -91,12 +93,13 @@ class Dispatcher:
             except TimeoutError:
                 pass
 
-    async def _enqueue_triggered_issues(self) -> None:
-        issues = await asyncio.to_thread(list_triggered_issues, self.config)
+    async def _enqueue_triggered_issues(self, repo: str) -> None:
+        repo_config = config_for_repo(self.config, repo)
+        issues = await asyncio.to_thread(list_triggered_issues, repo_config, repo)
         for issue in issues:
-            if self._should_skip_issue(issue, skip_existing=True):
+            if self._should_skip_issue(repo, issue, skip_existing=True):
                 continue
-            task = Task(self.config.repo, issue)
+            task = Task(repo, issue)
             await self._enqueue_task(task)
 
     async def _worker(self, worker_id: int) -> None:
@@ -109,7 +112,11 @@ class Dispatcher:
             self._active[worker_id] = task
             try:
                 await async_run_langgraph_pipeline(
-                    task, self.config, self.store, worker_id, self._shutdown
+                    task,
+                    config_for_repo(self.config, task.repo),
+                    self.store,
+                    worker_id,
+                    self._shutdown,
                 )
                 self._completed_count += 1
             except Exception as exc:
@@ -120,19 +127,20 @@ class Dispatcher:
                 )
             finally:
                 self._active[worker_id] = None
-                self._in_flight.discard(task.issue.number)
+                self._in_flight.discard((task.repo, task.issue.number))
                 self._queue.task_done()
 
-    def enqueue_review(self, issue: Issue) -> bool:
-        task = Task(self.config.repo, issue, TaskType.REVIEW)
-        if self._should_skip_issue(issue, skip_existing=False):
+    def enqueue_review(self, issue: Issue, repo: str | None = None) -> bool:
+        task_repo = repo or self._require_single_repo()
+        task = Task(task_repo, issue, TaskType.REVIEW)
+        if self._should_skip_issue(task_repo, issue, skip_existing=False):
             return False
 
         self._mark_queued(task)
         try:
             self._queue.put_nowait(task)
         except asyncio.QueueFull:
-            self._in_flight.discard(task.issue.number)
+            self._in_flight.discard((task.repo, task.issue.number))
             return False
         return True
 
@@ -155,16 +163,16 @@ class Dispatcher:
     def request_shutdown(self) -> None:
         self._shutdown.set()
 
-    def _should_skip_issue(self, issue: Issue, *, skip_existing: bool) -> bool:
-        if issue.number in self._in_flight:
+    def _should_skip_issue(
+        self, repo: str, issue: Issue, *, skip_existing: bool
+    ) -> bool:
+        if (repo, issue.number) in self._in_flight:
             return True
 
-        return (
-            skip_existing and self.store.get(self.config.repo, issue.number) is not None
-        )
+        return skip_existing and self.store.get(repo, issue.number) is not None
 
     def _mark_queued(self, task: Task) -> None:
-        self._in_flight.add(task.issue.number)
+        self._in_flight.add((task.repo, task.issue.number))
 
     async def _enqueue_task(self, task: Task) -> bool:
         self._mark_queued(task)
@@ -178,8 +186,27 @@ class Dispatcher:
             except TimeoutError:
                 pass
 
-        self._in_flight.discard(task.issue.number)
+        self._in_flight.discard((task.repo, task.issue.number))
         return False
+
+    def _get_repos(self) -> list[str]:
+        if hasattr(self.store, "get_repos"):
+            try:
+                return list(self.store.get_repos())  # type: ignore[attr-defined]
+            except Exception as exc:
+                print(
+                    f"warn: redis unavailable, skipping repo refresh: {exc}",
+                    file=sys.stderr,
+                )
+                return []
+        if self.config.repo:
+            return [self.config.repo]
+        return []
+
+    def _require_single_repo(self) -> str:
+        if self.config.repo is None:
+            raise RuntimeError("review enqueue requires an explicit repository")
+        return self.config.repo
 
     def _install_signal_handlers(self) -> None:
         loop = asyncio.get_running_loop()

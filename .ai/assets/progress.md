@@ -2,7 +2,7 @@
 
 ## Current Task
 
-No current tasks
+No active tasks
 
 ## Upcoming
 

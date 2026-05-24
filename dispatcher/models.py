@@ -28,7 +28,7 @@ class Commands:
 
 @dataclass(frozen=True)
 class Config:
-    repo: str
+    repo: str | None
     label: str
     base_branch: str
     branch_prefix: str
@@ -36,6 +36,8 @@ class Config:
     commands: Commands
     dry_run: bool
     poll_interval_seconds: float = 120.0
+    redis_url: str | None = None
+    redis_poll_interval: int = 60
     once: bool = False
     daemon: bool = False
     max_workers: int = 3
