@@ -1,5 +1,6 @@
 # Task Archive
 
+- [x] Issue #11: added GitHub CI checks, pre-commit hooks with `detect-secrets`, a branch-gate workflow for `dev` to `main` promotion, a structured issue form, and contributor documentation. See [CI/CD plan](.ai/assets/branches/feat/issue-11/ci-cd-plan.md).
 - [x] Config startup fix: load dispatcher defaults from a local `.env` file before CLI/environment defaults are evaluated, while preserving exported shell variables as higher priority. Covered by config regression tests.
 - [x] Issue #9: implemented Redis-backed dynamic repository tracking and shared state with `DISPATCHER_REPO` local fallback, pluggable state backend, repo-scoped daemon dedupe, documentation, and regression tests. See [plan](.ai/assets/branches/feat/issue-9/plan.md).
 - [x] feat/issue-3: implemented LangGraph daemon pipeline integration with worktree, plan, build, parallel plan/quality review, conditional build retry, max-iteration failure, and PR-opening graph nodes. See [plan](.ai/assets/branches/feat/issue-3/plan.md).

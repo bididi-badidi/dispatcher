@@ -1,0 +1,64 @@
+name: Bug or feature
+description: Report a bug or request a feature for dispatcher
+title: "[type]: "
+labels: ["automate"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What is broken, missing, or worth improving?
+      placeholder: Describe the user-visible problem or motivation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed_solution
+    attributes:
+      label: Proposed solution
+      description: Describe the implementation approach if you have one.
+      placeholder: Outline the expected behavior or technical direction.
+    validations:
+      required: false
+
+  - type: textarea
+    id: environment_variables
+    attributes:
+      label: New environment variables
+      description: List new variables, their purpose, and default values.
+      placeholder: DISPATCHER_EXAMPLE=value - purpose and default behavior.
+    validations:
+      required: false
+
+  - type: textarea
+    id: migration_plan
+    attributes:
+      label: Migration / fallback plan
+      description: Note migrations, feature flags, rollback steps, or compatibility concerns.
+      placeholder: Explain how existing users can move forward or roll back.
+    validations:
+      required: false
+
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Acceptance criteria
+      description: Provide a checklist of observable done conditions.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: label_category
+    attributes:
+      label: Labels
+      description: Choose the primary category for this issue.
+      options:
+        - bug
+        - enhancement
+        - chore
+        - automate
+    validations:
+      required: true
