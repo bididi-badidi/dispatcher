@@ -16,3 +16,6 @@ __pycache__/
 
 # Local dispatcher runtime state
 .dispatcher/
+
+# Agent session scratchpad (local only, never commit)
+.ai/assets/session_notes.md
