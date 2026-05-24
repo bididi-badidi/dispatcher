@@ -2,17 +2,7 @@
 
 ## Current context
 
-- Issue #3 is implemented on `feat/issue-3`.
-- Daemon workers now call `dispatcher.langgraph_pipeline.async_run_langgraph_pipeline`.
-- The legacy linear `dispatcher/pipeline.py` and `dispatcher/async_pipeline.py` modules remain for compatibility; queue daemon mode uses the LangGraph path.
-- `IssueState` gained nullable review/iteration/PR fields, so existing state records can still hydrate through dataclass defaults.
-- `uv` needs `UV_CACHE_DIR=/private/tmp/uv-cache-issue-3` in this sandbox because `/Users/user/.cache/uv` is not writable here.
-
-## Session note (2026-05-23)
-
-- GitHub issue #3 (`feat: integrate LangGraph for agentic multi-stage workflow with review loop`) is implemented on `feat/issue-3`.
-- Branch plan at `.ai/assets/branches/feat/issue-3/plan.md` is the authoritative implementation plan for this branch.
-- Local validation passed with `uv run ruff format .`, `uv run ruff check . --fix`, and `uv run pytest` using `UV_CACHE_DIR=/private/tmp/uv-cache-issue-3`.
+- No active handover blockers for `feat/issue-6`.
 
 ## Stable project context
 
@@ -37,3 +27,4 @@
   existing completed state as a review task.
 - Tests are organized by dispatcher component under `tests/test_*.py`, with
   shared fixtures in `tests/helpers.py` and path setup in `tests/conftest.py`.
+- `uv` needs `UV_CACHE_DIR=/private/tmp/uv-cache-issue-3` in this sandbox because `/Users/user/.cache/uv` is not writable here.
