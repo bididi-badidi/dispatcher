@@ -9,7 +9,13 @@ from unittest.mock import patch
 from dispatcher.constants import BANNED_AGENT_FLAGS
 from dispatcher.git import codex_git_write_dirs
 from dispatcher.models import Issue
-from dispatcher.runners import CodexRunner, GeminiRunner, build_stage_runners
+from dispatcher.runners import (
+    ClaudeReviewRunner,
+    ClaudeRunner,
+    CodexRunner,
+    GeminiRunner,
+    build_stage_runners,
+)
 from tests.helpers import make_config
 
 
@@ -168,6 +174,45 @@ class RunnerTests(unittest.TestCase):
         self.assertNotIn("GEMINI_SANDBOX", env)
         self.assertNotIn("SEATBELT_PROFILE", env)
         self.assertNotIn("SANDBOX_FLAGS", env)
+
+    def test_claude_runner_appends_plan_model_override(self) -> None:
+        runner = ClaudeRunner("plan")
+        issue = Issue(
+            13,
+            "Plan with Opus",
+            "https://example.test/13",
+            plan_model="claude-opus-4-7",
+        )
+
+        with self.assertLogs("dispatcher.runners", level="INFO") as logs:
+            command = runner.command_for(issue, "plan feature", Path("/tmp/worktree"))
+
+        self.assertEqual(command[-2:], ["--model", "claude-opus-4-7"])
+        self.assertIn(
+            "[planning] model escalated to claude-opus-4-7 (label: automate:opus)",
+            logs.output[0],
+        )
+
+    def test_claude_runner_uses_default_model_when_issue_has_no_override(self) -> None:
+        runner = ClaudeRunner("plan")
+        issue = Issue(13, "Plan normally", "https://example.test/13")
+
+        command = runner.command_for(issue, "plan feature", Path("/tmp/worktree"))
+
+        self.assertNotIn("--model", command)
+
+    def test_claude_review_runner_does_not_use_plan_model_override(self) -> None:
+        runner = ClaudeReviewRunner("review")
+        issue = Issue(
+            13,
+            "Review without Opus",
+            "https://example.test/13",
+            plan_model="claude-opus-4-7",
+        )
+
+        command = runner.command_for(issue, "review feature", Path("/tmp/worktree"))
+
+        self.assertNotIn("--model", command)
 
     def test_codex_git_write_dirs_stay_empty_for_a_normal_checkout(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

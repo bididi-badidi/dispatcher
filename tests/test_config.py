@@ -41,6 +41,29 @@ class ConfigTests(unittest.TestCase):
             )
             self.assertEqual(config.poll_interval_seconds, 120.0)
             self.assertFalse(config.once)
+            self.assertEqual(config.opus_label, "automate:opus")
+            self.assertEqual(config.opus_model, "claude-opus-4-7")
+
+    def test_reads_opus_label_and_model_from_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dispatcher_dir = Path(temp_dir) / "dispatcher"
+            dispatcher_dir.mkdir()
+            with (
+                patch("pathlib.Path.cwd", return_value=dispatcher_dir),
+                patch.dict(
+                    "os.environ",
+                    {
+                        "DISPATCHER_REPO": "owner/target-repo",
+                        "DISPATCHER_OPUS_LABEL": "needs-opus",
+                        "DISPATCHER_OPUS_MODEL": "claude-opus-4-5",
+                    },
+                    clear=True,
+                ),
+            ):
+                config = build_config([])
+
+            self.assertEqual(config.opus_label, "needs-opus")
+            self.assertEqual(config.opus_model, "claude-opus-4-5")
 
     def test_defaults_to_sibling_repo_from_dispatcher_worktree(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

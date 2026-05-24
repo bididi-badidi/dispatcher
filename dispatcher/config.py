@@ -11,6 +11,8 @@ from dispatcher.constants import (
     DEFAULT_BRANCH_PREFIX,
     DEFAULT_LABEL,
     DEFAULT_LOG_DIR,
+    DEFAULT_OPUS_LABEL,
+    DEFAULT_PLAN_OPUS_MODEL,
     DEFAULT_POLL_INTERVAL_SECONDS,
     DEFAULT_STATE_FILE,
 )
@@ -168,6 +170,8 @@ def build_config(argv: Sequence[str] | None = None) -> Config:
     dispatcher_dir = Path.cwd().resolve()
     repo = os.getenv("DISPATCHER_REPO")
     redis_url = os.getenv("DISPATCHER_REDIS_URL")
+    opus_label = os.getenv("DISPATCHER_OPUS_LABEL", DEFAULT_OPUS_LABEL)
+    opus_model = os.getenv("DISPATCHER_OPUS_MODEL", DEFAULT_PLAN_OPUS_MODEL)
     redis_poll_interval = positive_int(
         os.getenv("DISPATCHER_REDIS_POLL_INTERVAL", "60")
     )
@@ -189,6 +193,8 @@ def build_config(argv: Sequence[str] | None = None) -> Config:
     config = Config(
         repo=repo,
         label=args.label,
+        opus_label=opus_label,
+        opus_model=opus_model,
         base_branch=args.base_branch,
         branch_prefix=args.branch_prefix,
         paths=Paths(
