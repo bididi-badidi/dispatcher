@@ -16,6 +16,10 @@ DISPATCHER_REPO=OWNER/REPO uv run python main.py
 Useful options:
 
 - `--label automate` chooses the trigger label.
+- `DISPATCHER_OPUS_LABEL=automate:opus` chooses the secondary label that
+  escalates only the planning stage to Opus.
+- `DISPATCHER_OPUS_MODEL=claude-opus-4-7` chooses the Claude model used when
+  the Opus escalation label is present.
 - `DISPATCHER_REDIS_URL=redis://...` enables Redis-backed repository tracking
   and shared issue state. Repositories are read from the `dispatcher:repos`
   Redis set.
@@ -65,6 +69,11 @@ DISPATCHER_REDIS_URL=redis://localhost:6379/0 uv run python main.py --daemon
 Issue state is terminal once a record exists, including `failed` records. The
 poller will not automatically retry failed issues; clear or edit the relevant
 entry in `.dispatcher/state.json` before reprocessing an issue.
+
+Issues with both the main trigger label, `automate` by default, and the
+secondary `automate:opus` label run the planning stage with
+`claude-opus-4-7`. Worktree creation and build stages keep their normal
+provider defaults.
 
 ## Stage Prompts
 

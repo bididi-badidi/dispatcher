@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from dispatcher.async_runners import async_run_stage
 from dispatcher.models import Config, Issue
-from dispatcher.runners import AgentRunner
+from dispatcher.runners import AgentRunner, ClaudeRunner
 from tests.helpers import make_config
 
 
@@ -79,5 +79,36 @@ class AsyncRunnerTests(unittest.TestCase):
                 log_text = log_path.read_text(encoding="utf-8")
                 self.assertIn("[stdout]\ndone", log_text)
                 self.assertIn("[stderr]\nwarn", log_text)
+
+        asyncio.run(scenario())
+
+    def test_async_dry_run_uses_plan_model_override(self) -> None:
+        async def scenario() -> None:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                worktree = Path(temp_dir)
+                config = make_config(worktree)
+                runner = ClaudeRunner("plan $issue_number")
+                issue = Issue(
+                    13,
+                    "Plan with Opus",
+                    "https://example.test/13",
+                    plan_model="claude-opus-4-7",
+                )
+
+                with patch.object(ClaudeRunner, "version", return_value="claude 1.0"):
+                    await async_run_stage(
+                        "plan",
+                        runner,
+                        issue,
+                        config,
+                        worktree,
+                        "feat/issue-13",
+                    )
+
+                log_path = (
+                    config.paths.log_dir / "example" / "repo" / "issue-13-plan.log"
+                )
+                log_text = log_path.read_text(encoding="utf-8")
+                self.assertIn("--model claude-opus-4-7", log_text)
 
         asyncio.run(scenario())

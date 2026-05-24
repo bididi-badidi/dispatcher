@@ -25,6 +25,8 @@ class AsyncPipelineTests(unittest.TestCase):
                 config = Config(
                     repo=config.repo,
                     label=config.label,
+                    opus_label=config.opus_label,
+                    opus_model=config.opus_model,
                     base_branch=config.base_branch,
                     branch_prefix=config.branch_prefix,
                     paths=Paths(
