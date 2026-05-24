@@ -19,6 +19,7 @@
       "Bash(gh issue lock *)",
       "Bash(gh issue pin *)",
       "Bash(gh issue transfer *)",
+      "Bash(gh pr close *)",
       "Bash(gh pr lock *)",
       "Bash(gh pr merge *)",
       "Bash(gh pr ready *)",
