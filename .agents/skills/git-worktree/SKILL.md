@@ -114,7 +114,13 @@ Use `setup` after manually creating a worktree or when the user says the checkou
 
 ## Set Up Git Credentials
 
-Run this command in the target worktree to set up Git credentials:
+When setting up Git credentials, first derive the repository SSH URL by running this command in the source checkout:
+
+```bash
+git remote get-url origin
+```
+
+Use the output from that command to set the origin URL in the target worktree. This ensures you use the correct host (e.g., if a custom SSH alias is configured) before falling back to a hard-coded URL. If `git remote get-url origin` is unavailable or returns an HTTPS URL, derive the SSH URL using the bot's preferred host `github-bot`:
 
 ```bash
 git remote set-url origin git@github-bot:{organization}/{repo}.git

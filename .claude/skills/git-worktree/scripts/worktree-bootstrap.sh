@@ -34,20 +34,23 @@ sync_from_origin() {
     return
   }
 
+  echo "Fetching origin..."
   git fetch origin
 
   current_branch="$(git branch --show-current)"
   if [[ -z "$current_branch" ]]; then
-    echo "Detached HEAD; fetched origin but skipped pull"
+    echo "Detached HEAD; fetched origin but skipped merge"
     return
   fi
 
   if git rev-parse --abbrev-ref --symbolic-full-name "@{u}" >/dev/null 2>&1; then
-    git pull --ff-only
+    echo "Updating $current_branch from upstream..."
+    git merge --ff-only "@{u}"
   elif git show-ref --verify --quiet "refs/remotes/origin/$current_branch"; then
-    git pull --ff-only origin "$current_branch"
+    echo "Updating $current_branch from origin/$current_branch..."
+    git merge --ff-only "origin/$current_branch"
   else
-    echo "No upstream or origin/$current_branch branch found; fetched origin but skipped pull"
+    echo "No upstream or origin/$current_branch branch found; fetched origin but skipped merge"
   fi
 }
 
