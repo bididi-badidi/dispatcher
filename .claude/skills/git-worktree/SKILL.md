@@ -1,6 +1,6 @@
 ---
 name: git-worktree
-version: 1.1.1
+version: 1.2.1
 description: "Use this skill when creating or preparing an isolated Git worktree with the repository bootstrap script. Triggers: 'create a worktree', 'new worktree', 'set up a worktree', 'work on this in a separate checkout', 'bootstrap worktree', 'copy env files to worktree', 'install dependencies in worktree'. Do NOT use for general Git branching, commits, pull requests, or merge conflict workflows; use git-workflow for those."
 ---
 
@@ -8,7 +8,7 @@ description: "Use this skill when creating or preparing an isolated Git worktree
 
 ## Overview
 
-Use this skill to create or prepare a Git worktree that is ready for development. Always prefer the bundled script at `scripts/worktree-bootstrap.sh` because it creates the worktree, copies git-ignored environment files such as `.env`, and installs dependencies in one repeatable flow. Follow the project tree convention where each repository has a container folder named after the repository, with each worktree below it at `<repo-name>/<branch-name>`. Preserve branch slashes as directories: `main` lives at `repo-name/main`, `dev` lives at `repo-name/dev`, `feat/new-feat` lives at `repo-name/feat/new-feat`, and `ci/github-workflow` lives at `repo-name/ci/github-workflow`.
+Use this skill to create or prepare a Git worktree that is ready for development. Always prefer the bundled script at `scripts/worktree-bootstrap.sh` because it pulls the current checkout from `origin`, creates the worktree, copies git-ignored environment files such as `.env`, and installs dependencies in one repeatable flow. Follow the project tree convention where each repository has a container folder named after the repository, with each worktree below it at `<repo-name>/<branch-name>`. Preserve branch slashes as directories: `main` lives at `repo-name/main`, `dev` lives at `repo-name/dev`, `feat/new-feat` lives at `repo-name/feat/new-feat`, and `ci/github-workflow` lives at `repo-name/ci/github-workflow`.
 
 ## Prepare the Worktree Inputs
 
@@ -52,6 +52,8 @@ script_path="<skill-directory>/scripts/worktree-bootstrap.sh"
 ```
 
 ## Create a New Worktree
+
+Before creating a new worktree, pull the latest changes from `origin` in the source checkout. The bootstrap script does this automatically by running `git fetch origin` and then a fast-forward-only `git pull` for the current branch when an upstream or matching `origin/<branch>` exists. If the pull cannot fast-forward, stop and ask the user how to resolve the local divergence before creating the worktree.
 
 Run the bootstrap script from the repository root when the user wants a new worktree:
 
@@ -110,6 +112,35 @@ If the target worktree folder already exists and only needs ignored files copied
 
 Use `setup` after manually creating a worktree or when the user says the checkout already exists.
 
+## Set Up Git Credentials
+
+When setting up Git credentials, first derive the repository SSH URL by running this command in the source checkout:
+
+```bash
+git remote get-url origin
+```
+
+Use the output from that command to set the origin URL in the target worktree. This ensures you use the correct host (e.g., if a custom SSH alias is configured) before falling back to a hard-coded URL. If `git remote get-url origin` is unavailable or returns an HTTPS URL, derive the SSH URL using the bot's preferred host `github-bot`:
+
+```bash
+git remote set-url origin git@github-bot:{organization}/{repo}.git
+```
+
+Set the local commit identity to the bot account:
+
+```bash
+git config --local user.name  "Coding Agent"
+git config --local user.email "bot@gmail.com"
+```
+
+## Push to Remote
+
+Push the new branch to the remote after the worktree is ready:
+
+```bash
+git push origin <new_branch>
+```
+
 ## Verification
 
 After the script finishes, verify the worktree without exposing secrets:
@@ -137,7 +168,7 @@ script_path="<skill-directory>/scripts/worktree-bootstrap.sh"
 "$script_path" add ../my-repo/feat/new-feat feat/new-feat
 ```
 
-Expected result: the script creates `../my-repo/feat/new-feat`, checks out `feat/new-feat`, copies `.env` files from the repository root, and installs dependencies. The resulting tree includes `my-repo/main`, `my-repo/dev` when created, and `my-repo/feat/new-feat`.
+Expected result: the script pulls the source checkout from `origin`, creates `../my-repo/feat/new-feat`, checks out `feat/new-feat`, copies `.env` files from the repository root, and installs dependencies. The resulting tree includes `my-repo/main`, `my-repo/dev` when created, and `my-repo/feat/new-feat`.
 
 User request:
 
@@ -159,6 +190,7 @@ Expected result: the script copies `.env` files into the existing worktree and i
 | Wrong behavior | Correct behavior |
 | --- | --- |
 | Manually run `git worktree add`, copy `.env`, and install dependencies as separate ad hoc steps. | Use `scripts/worktree-bootstrap.sh` so setup is repeatable. |
+| Create a new worktree from a stale local checkout. | Pull changes from `origin` before creating the worktree; let the script's fast-forward-only sync run first. |
 | Print `.env` contents to prove files copied. | List filenames only. Never display secret values. |
 | Pass `--base` when checking out an existing branch. | Omit `--base` for existing branches. |
 | Skip dependency installation by default. | Install dependencies unless the user asks for `--no-install`. |
