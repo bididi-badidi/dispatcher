@@ -16,6 +16,7 @@ def render_template(
         "issue_title": issue.title,
         "issue_url": issue.url,
         "label": config.label,
+        "plan_path": str(worktree / ".ai" / "assets" / "branches" / branch / "plan.md"),
         "project_dir": str(config.paths.project_dir),
         "repo": config.repo,
         "worktree": str(worktree),
@@ -45,4 +46,30 @@ def default_build_command() -> str:
         "remote, and open a PR with the configured GitHub MCP when it is "
         "available. Do not require the gh CLI for PR creation. Stop after PR "
         "creation."
+    )
+
+
+def default_review_plan_command() -> str:
+    return (
+        "Review the implementation for GitHub issue #$issue_number against the "
+        "saved branch plan at $plan_path. Reply with exactly one verdict line: "
+        "VERDICT: approved or VERDICT: changes_requested. Include concise "
+        "feedback after the verdict only when changes are needed."
+    )
+
+
+def default_review_quality_command() -> str:
+    return (
+        "Review the code quality, edge cases, and test coverage for GitHub "
+        "issue #$issue_number in $worktree. Reply with exactly one verdict "
+        "line: VERDICT: approved or VERDICT: changes_requested. Include "
+        "concise feedback after the verdict only when changes are needed."
+    )
+
+
+def default_open_pr_command() -> str:
+    return (
+        "Push branch $branch for GitHub issue #$issue_number to the remote and "
+        "open a pull request against $base_branch. The PR body must include "
+        "Closes #$issue_number. Print the PR URL when done."
     )

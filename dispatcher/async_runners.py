@@ -17,7 +17,7 @@ async def async_run_stage(
     config: Config,
     worktree: Path,
     branch: str,
-) -> None:
+) -> str:
     if runner.stage_name != name:
         raise ValueError(f"runner {runner.stage_name!r} cannot run {name!r}")
 
@@ -39,7 +39,7 @@ async def async_run_stage(
             f"DRY RUN: {command_text}{stdin_log}\n\n[version]\n{version}\n",
             encoding="utf-8",
         )
-        return
+        return ""
 
     print_subprocess_command(command)
     proc = await asyncio.create_subprocess_exec(
@@ -66,3 +66,4 @@ async def async_run_stage(
             f"{runner.stage_name} stage failed with exit code "
             f"{proc.returncode}; see {log_path}"
         )
+    return stdout_text

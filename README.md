@@ -43,7 +43,9 @@ interval and tries again. Press Ctrl-C to stop the process.
 
 Daemon mode keeps the same polling source and stage runners, but enqueues
 unseen issues into an `asyncio` worker pool so multiple issue pipelines can run
-at the same time:
+at the same time. Worker pipelines run through a LangGraph state graph:
+worktree creation, planning, build, parallel plan/code-quality reviews,
+conditional build retry, and PR opening.
 
 ```bash
 uv run python main.py --repo OWNER/REPO --daemon --max-workers 3
@@ -117,9 +119,9 @@ uv run pytest
 - `dispatcher/config.py` owns CLI argument parsing and environment defaults.
 - `dispatcher/github.py`, `dispatcher/state.py`, and `dispatcher/pipeline.py`
   own issue polling, persisted state, and orchestration flow.
-- `dispatcher/queue.py`, `dispatcher/async_pipeline.py`, and
-  `dispatcher/async_runners.py` own daemon-mode queueing and non-blocking
-  subprocess execution.
+- `dispatcher/queue.py`, `dispatcher/langgraph_pipeline.py`, and
+  `dispatcher/async_runners.py` own daemon-mode queueing, graph orchestration,
+  and non-blocking subprocess execution.
 - `dispatcher/runners.py` owns provider-specific Gemini, Claude, and Codex
   subprocess commands.
 - `dispatcher/git.py` and `dispatcher/prompts.py` hold worktree/Git helpers and

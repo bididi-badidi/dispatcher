@@ -12,6 +12,7 @@ from dispatcher.constants import (
     BANNED_AGENT_FLAGS,
     CLAUDE_PLAN_ALLOWED_TOOLS,
     CLAUDE_PLAN_DISALLOWED_TOOLS,
+    CLAUDE_REVIEW_ALLOWED_TOOLS,
     GEMINI_WORKTREE_ALLOWED_TOOLS,
 )
 from dispatcher.git import codex_git_write_dirs
@@ -161,6 +162,22 @@ class ClaudeRunner(AgentRunner):
         return prompt
 
 
+class ClaudeReviewRunner(ClaudeRunner):
+    stage_name = "review"
+
+    def command(self, prompt: str, cwd: Path) -> list[str]:
+        return [
+            self.executable,
+            "--print",
+            "--permission-mode",
+            "acceptEdits",
+            "--allowedTools",
+            ",".join(CLAUDE_REVIEW_ALLOWED_TOOLS),
+            "--disallowedTools",
+            ",".join(CLAUDE_PLAN_DISALLOWED_TOOLS),
+        ]
+
+
 class CodexRunner(AgentRunner):
     stage_name = "build"
     executable = "codex"
@@ -196,6 +213,13 @@ class CodexRunner(AgentRunner):
             ]
         )
         return command
+
+
+class GeminiPrRunner(GeminiRunner):
+    stage_name = "open_pr"
+
+    def cwd(self, config: Config, worktree: Path) -> Path:
+        return worktree
 
 
 def build_stage_runners(config: Config) -> dict[str, AgentRunner]:
