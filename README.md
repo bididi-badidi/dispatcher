@@ -10,12 +10,17 @@ stops each issue after the build stage opens a PR.
 ## Usage
 
 ```bash
-uv run python main.py --repo OWNER/REPO
+DISPATCHER_REPO=OWNER/REPO uv run python main.py
 ```
 
 Useful options:
 
 - `--label automate` chooses the trigger label.
+- `DISPATCHER_REDIS_URL=redis://...` enables Redis-backed repository tracking
+  and shared issue state. Repositories are read from the `dispatcher:repos`
+  Redis set.
+- `DISPATCHER_REPO=OWNER/REPO` keeps the single-repository local JSON fallback
+  when Redis is not configured.
 - `--base-branch main` chooses the branch used for the worktree.
 - The base checkout defaults to `/Projects/{repo_name}/main` when the
   dispatcher is run from `/Projects/dispatcher` or `/Projects/dispatcher/main`.
@@ -48,7 +53,13 @@ worktree creation, planning, build, parallel plan/code-quality reviews,
 conditional build retry, and PR opening.
 
 ```bash
-uv run python main.py --repo OWNER/REPO --daemon --max-workers 3
+DISPATCHER_REPO=OWNER/REPO uv run python main.py --daemon --max-workers 3
+```
+
+Redis-backed daemon mode polls every repository currently registered in Redis:
+
+```bash
+DISPATCHER_REDIS_URL=redis://localhost:6379/0 uv run python main.py --daemon
 ```
 
 Issue state is terminal once a record exists, including `failed` records. The
@@ -64,7 +75,7 @@ non-interactive CLI flags; the configurable value is only the prompt template:
 DISPATCHER_WORKTREE_COMMAND='Create a git worktree for issue #$issue_number ...' \
 DISPATCHER_PLAN_COMMAND='Plan issue #$issue_number ...' \
 DISPATCHER_BUILD_COMMAND='Implement issue #$issue_number ...' \
-uv run python main.py --repo OWNER/REPO
+DISPATCHER_REPO=OWNER/REPO uv run python main.py
 ```
 
 Available template variables include `$issue_number`, `$issue_title`,
@@ -117,6 +128,7 @@ uv run pytest
 - `main.py` is a thin compatibility entry point for `python main.py` and tests
   that import the historical module.
 - `dispatcher/config.py` owns CLI argument parsing and environment defaults.
+- `dispatcher/redis_store.py` owns Redis-backed repo discovery and shared state.
 - `dispatcher/github.py`, `dispatcher/state.py`, and `dispatcher/pipeline.py`
   own issue polling, persisted state, and orchestration flow.
 - `dispatcher/queue.py`, `dispatcher/langgraph_pipeline.py`, and

@@ -4,14 +4,14 @@ from dispatcher.models import Config, Issue
 from dispatcher.subprocess_utils import run_json
 
 
-def list_triggered_issues(config: Config) -> list[Issue]:
+def list_triggered_issues(config: Config, repo: str) -> list[Issue]:
     raw_issues = run_json(
         [
             "gh",
             "issue",
             "list",
             "--repo",
-            config.repo,
+            repo,
             "--label",
             config.label,
             "--state",

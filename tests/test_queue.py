@@ -40,7 +40,7 @@ class QueueTests(unittest.TestCase):
                         Issue(2, "New", "https://example.test/2"),
                         Issue(2, "New", "https://example.test/2"),
                     ]
-                    await dispatcher._enqueue_triggered_issues()
+                    await dispatcher._enqueue_triggered_issues(config.repo)
 
                 snapshot = dispatcher.snapshot()
                 self.assertEqual(
@@ -107,13 +107,30 @@ class QueueTests(unittest.TestCase):
                         Issue(99, "Blocked", "https://example.test/99")
                     ]
                     enqueue = asyncio.create_task(
-                        dispatcher._enqueue_triggered_issues()
+                        dispatcher._enqueue_triggered_issues(config.repo)
                     )
                     await asyncio.sleep(0.02)
                     dispatcher.request_shutdown()
                     result = await asyncio.wait_for(enqueue, timeout=1)
 
                 self.assertIsNone(result)
-                self.assertNotIn(99, dispatcher._in_flight)
+                self.assertNotIn((config.repo, 99), dispatcher._in_flight)
 
         asyncio.run(scenario())
+
+    def test_get_repos_uses_redis_store_repo_list(self) -> None:
+        class RedisLikeStore:
+            def get_repos(self) -> list[str]:
+                return ["example/one", "example/two"]
+
+            def get(self, repo: str, issue_number: int) -> None:
+                return None
+
+            def upsert(self, repo, state) -> None:
+                raise AssertionError("unexpected write")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = make_config(Path(temp_dir), repo=None)
+            dispatcher = Dispatcher(config, RedisLikeStore(), max_workers=1)
+
+            self.assertEqual(dispatcher._get_repos(), ["example/one", "example/two"])

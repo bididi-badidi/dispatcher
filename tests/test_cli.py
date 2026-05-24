@@ -18,9 +18,12 @@ class CliTests(unittest.TestCase):
             dispatcher_dir.mkdir()
             with (
                 patch("pathlib.Path.cwd", return_value=dispatcher_dir),
+                patch.dict(
+                    "os.environ", {"DISPATCHER_REPO": "owner/target-repo"}, clear=True
+                ),
                 patch("dispatcher.cli._run_daemon", return_value=0) as run_daemon,
             ):
-                result = main(["--repo", "owner/target-repo", "--daemon"])
+                result = main(["--daemon"])
 
             self.assertEqual(result, 0)
             self.assertEqual(run_daemon.call_count, 1)
@@ -75,3 +78,40 @@ class CliTests(unittest.TestCase):
                     run_polling_loop(config, store, sleep=sleep)
 
             self.assertEqual(calls, [120.0])
+
+    def test_main_uses_local_store_without_redis_url(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dispatcher_dir = Path(temp_dir) / "dispatcher"
+            dispatcher_dir.mkdir()
+            with (
+                patch("pathlib.Path.cwd", return_value=dispatcher_dir),
+                patch.dict(
+                    "os.environ", {"DISPATCHER_REPO": "owner/target-repo"}, clear=True
+                ),
+                patch("dispatcher.cli.StateStore") as state_store,
+                patch("dispatcher.cli.run_once", return_value=False),
+            ):
+                result = main(["--once"])
+
+            self.assertEqual(result, 0)
+            self.assertEqual(state_store.call_count, 1)
+
+    def test_run_once_skips_empty_redis_repo_list(self) -> None:
+        root = Path(tempfile.mkdtemp())
+        config = make_config(root, repo=None)
+
+        class EmptyRedisStore:
+            def get_repos(self) -> list[str]:
+                return []
+
+            def get(self, repo: str, issue_number: int) -> None:
+                return None
+
+            def upsert(self, repo, state) -> None:
+                raise AssertionError("unexpected write")
+
+        with patch("dispatcher.cli.list_triggered_issues") as list_issues:
+            result = legacy_main.run_once(config, EmptyRedisStore())
+
+        self.assertFalse(result)
+        list_issues.assert_not_called()

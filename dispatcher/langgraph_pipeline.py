@@ -27,7 +27,7 @@ from dispatcher.runners import (
     GeminiPrRunner,
     build_stage_runners,
 )
-from dispatcher.state import StateStore
+from dispatcher.state_backend import StateBackend
 from dispatcher.time_utils import utc_now
 
 MAX_ITERATIONS = 3
@@ -69,15 +69,16 @@ class PipelineState(TypedDict, total=False):
 async def async_run_langgraph_pipeline(
     task: PipelineTask,
     config: Config,
-    store: StateStore,
+    store: StateBackend,
     worker_id: int,
     shutdown_event: asyncio.Event,
 ) -> IssueState:
     issue = task.issue
+    repo = _require_repo(config)
     task_type = getattr(task.task_type, "value", str(task.task_type))
     worktree = worktree_path_for_issue(config, issue)
     branch = branch_for_issue(config, issue)
-    existing = store.get(config.repo, issue.number)
+    existing = store.get(repo, issue.number)
     max_iterations = int(os.getenv("DISPATCHER_MAX_ITERATIONS", str(MAX_ITERATIONS)))
     if max_iterations <= 0:
         raise ValueError("DISPATCHER_MAX_ITERATIONS must be greater than 0")
@@ -86,7 +87,7 @@ async def async_run_langgraph_pipeline(
         "issue_number": issue.number,
         "issue_title": issue.title,
         "issue_url": issue.url,
-        "repo": config.repo,
+        "repo": repo,
         "base_branch": config.base_branch,
         "task_type": task_type,
         "worker_id": worker_id,
@@ -117,13 +118,12 @@ async def async_run_langgraph_pipeline(
         initial_state["pr_url"] = existing.get("pr_url")
 
     graph = _build_graph(config, store, issue, shutdown_event)
-    graph = _build_graph(config, store, issue, shutdown_event)
     try:
         final_state = await graph.ainvoke(initial_state)
     except Exception as exc:
         # Preserve whatever the last persisted node wrote, if any, so failures
         # late in the graph don't overwrite useful progress in the state store.
-        latest = store.get(config.repo, issue.number) or {}
+        latest = store.get(repo, issue.number) or {}
         failed_state = dict(initial_state)
         for key in (
             "build_iteration",
@@ -147,7 +147,7 @@ async def async_run_langgraph_pipeline(
 
 def _build_graph(
     config: Config,
-    store: StateStore,
+    store: StateBackend,
     issue: Issue,
     shutdown_event: asyncio.Event,
 ):
@@ -377,7 +377,7 @@ def _combined_feedback(state: PipelineState) -> str | None:
 
 
 def _persist_state(
-    config: Config, store: StateStore, state: PipelineState
+    config: Config, store: StateBackend, state: PipelineState
 ) -> IssueState:
     issue_state = IssueState(
         number=int(state["issue_number"]),
@@ -398,7 +398,7 @@ def _persist_state(
         quality_review_feedback=state.get("quality_review_feedback"),
         pr_url=state.get("pr_url"),
     )
-    store.upsert(config.repo, issue_state)
+    store.upsert(str(state["repo"]), issue_state)
     return issue_state
 
 
@@ -409,3 +409,9 @@ def _plan_path(worktree: Path, branch: str) -> Path:
 def _raise_if_shutdown(shutdown_event: asyncio.Event) -> None:
     if shutdown_event.is_set():
         raise RuntimeError("shutdown requested")
+
+
+def _require_repo(config: Config) -> str:
+    if config.repo is None:
+        raise RuntimeError("pipeline requires a concrete repository")
+    return config.repo

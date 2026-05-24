@@ -6,7 +6,7 @@ from dispatcher.models import Commands, Config, Paths
 
 
 def make_config(
-    root: Path, *, dry_run: bool = True, repo: str = "example/repo"
+    root: Path, *, dry_run: bool = True, repo: str | None = "example/repo"
 ) -> Config:
     return Config(
         repo=repo,

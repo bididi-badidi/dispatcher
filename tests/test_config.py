@@ -15,8 +15,13 @@ class ConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             dispatcher_dir = Path(temp_dir) / "dispatcher"
             dispatcher_dir.mkdir()
-            with patch("pathlib.Path.cwd", return_value=dispatcher_dir):
-                config = build_config(["--repo", "owner/target-repo"])
+            with (
+                patch("pathlib.Path.cwd", return_value=dispatcher_dir),
+                patch.dict(
+                    "os.environ", {"DISPATCHER_REPO": "owner/target-repo"}, clear=True
+                ),
+            ):
+                config = build_config([])
 
             repo_root = (dispatcher_dir.parent / "target-repo").resolve()
             self.assertEqual(config.paths.project_dir, repo_root / "main")
@@ -40,8 +45,13 @@ class ConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             dispatcher_main = Path(temp_dir) / "dispatcher" / "main"
             dispatcher_main.mkdir(parents=True)
-            with patch("pathlib.Path.cwd", return_value=dispatcher_main):
-                config = build_config(["--repo", "owner/target-repo"])
+            with (
+                patch("pathlib.Path.cwd", return_value=dispatcher_main),
+                patch.dict(
+                    "os.environ", {"DISPATCHER_REPO": "owner/target-repo"}, clear=True
+                ),
+            ):
+                config = build_config([])
 
             repo_root = (Path(temp_dir) / "target-repo").resolve()
             self.assertEqual(config.paths.project_dir, repo_root / "main")
@@ -63,10 +73,13 @@ class ConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             dispatcher_dir = Path(temp_dir) / "dispatcher"
             dispatcher_dir.mkdir()
-            with patch("pathlib.Path.cwd", return_value=dispatcher_dir):
-                config = build_config(
-                    ["--repo", "owner/target-repo", "--poll-interval", "30", "--once"]
-                )
+            with (
+                patch("pathlib.Path.cwd", return_value=dispatcher_dir),
+                patch.dict(
+                    "os.environ", {"DISPATCHER_REPO": "owner/target-repo"}, clear=True
+                ),
+            ):
+                config = build_config(["--poll-interval", "30", "--once"])
 
             self.assertEqual(config.poll_interval_seconds, 30.0)
             self.assertTrue(config.once)
@@ -75,11 +88,14 @@ class ConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             dispatcher_dir = Path(temp_dir) / "dispatcher"
             dispatcher_dir.mkdir()
-            with patch("pathlib.Path.cwd", return_value=dispatcher_dir):
+            with (
+                patch("pathlib.Path.cwd", return_value=dispatcher_dir),
+                patch.dict(
+                    "os.environ", {"DISPATCHER_REPO": "owner/target-repo"}, clear=True
+                ),
+            ):
                 config = build_config(
                     [
-                        "--repo",
-                        "owner/target-repo",
                         "--daemon",
                         "--max-workers",
                         "5",
@@ -93,6 +109,53 @@ class ConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             dispatcher_dir = Path(temp_dir) / "dispatcher"
             dispatcher_dir.mkdir()
-            with patch("pathlib.Path.cwd", return_value=dispatcher_dir):
+            with (
+                patch("pathlib.Path.cwd", return_value=dispatcher_dir),
+                patch.dict(
+                    "os.environ", {"DISPATCHER_REPO": "owner/target-repo"}, clear=True
+                ),
+            ):
                 with self.assertRaises(SystemExit):
-                    build_config(["--repo", "owner/target-repo", "--once", "--daemon"])
+                    build_config(["--once", "--daemon"])
+
+    def test_reads_redis_url_from_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dispatcher_dir = Path(temp_dir) / "dispatcher"
+            dispatcher_dir.mkdir()
+            with (
+                patch("pathlib.Path.cwd", return_value=dispatcher_dir),
+                patch.dict(
+                    "os.environ",
+                    {"DISPATCHER_REDIS_URL": "redis://localhost:6379/0"},
+                    clear=True,
+                ),
+            ):
+                config = build_config([])
+
+        self.assertIsNone(config.repo)
+        self.assertEqual(config.redis_url, "redis://localhost:6379/0")
+        self.assertEqual(config.redis_poll_interval, 60)
+
+    def test_reads_single_repo_fallback_from_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dispatcher_dir = Path(temp_dir) / "dispatcher"
+            dispatcher_dir.mkdir()
+            with (
+                patch("pathlib.Path.cwd", return_value=dispatcher_dir),
+                patch.dict("os.environ", {"DISPATCHER_REPO": "owner/repo"}, clear=True),
+            ):
+                config = build_config([])
+
+        self.assertEqual(config.repo, "owner/repo")
+        self.assertIsNone(config.redis_url)
+
+    def test_requires_redis_url_or_single_repo(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dispatcher_dir = Path(temp_dir) / "dispatcher"
+            dispatcher_dir.mkdir()
+            with (
+                patch("pathlib.Path.cwd", return_value=dispatcher_dir),
+                patch.dict("os.environ", {}, clear=True),
+            ):
+                with self.assertRaisesRegex(SystemExit, "DISPATCHER_REDIS_URL"):
+                    build_config([])

@@ -26,6 +26,8 @@ async def async_run_stage(
     command = runner.command(prompt, cwd)
     runner._validate_command(command)
 
+    if config.repo is None:
+        raise RuntimeError("runner requires a concrete repository")
     repo_log_dir = config.paths.log_dir / config.repo
     repo_log_dir.mkdir(parents=True, exist_ok=True)
     log_path = repo_log_dir / f"issue-{issue.number}-{runner.stage_name}.log"

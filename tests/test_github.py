@@ -20,9 +20,10 @@ class GitHubTests(unittest.TestCase):
                     {"number": 3, "title": "Ship it", "url": "https://example.test/3"}
                 ]
 
-                issues = list_triggered_issues(config)
+                issues = list_triggered_issues(config, "owner/repo")
 
             self.assertEqual(issues, [Issue(3, "Ship it", "https://example.test/3")])
             command = run_json.call_args.args[0]
             self.assertIn("--label", command)
             self.assertIn("automate", command)
+            self.assertIn("owner/repo", command)

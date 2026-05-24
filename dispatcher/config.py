@@ -40,9 +40,6 @@ def build_config(argv: Sequence[str] | None = None) -> Config:
     parser = argparse.ArgumentParser(
         description="Run the local issue-triggered dispatcher happy path."
     )
-    parser.add_argument(
-        "--repo", required=True, help="GitHub repository in owner/name form."
-    )
     parser.add_argument("--label", default=os.getenv("DISPATCHER_LABEL", DEFAULT_LABEL))
     parser.add_argument(
         "--base-branch",
@@ -117,7 +114,12 @@ def build_config(argv: Sequence[str] | None = None) -> Config:
     args = parser.parse_args(argv)
 
     dispatcher_dir = Path.cwd().resolve()
-    repo_name = repo_name_from_full_name(args.repo)
+    repo = os.getenv("DISPATCHER_REPO")
+    redis_url = os.getenv("DISPATCHER_REDIS_URL")
+    redis_poll_interval = positive_int(
+        os.getenv("DISPATCHER_REDIS_POLL_INTERVAL", "60")
+    )
+    repo_name = repo_name_from_full_name(repo) if repo else dispatcher_dir.name
     worktree_root = (
         args.worktree_root
         or default_worktree_root(dispatcher_dir, repo_name, args.base_branch)
@@ -132,8 +134,8 @@ def build_config(argv: Sequence[str] | None = None) -> Config:
         args.log_dir if args.log_dir.is_absolute() else dispatcher_dir / args.log_dir
     )
 
-    return Config(
-        repo=args.repo,
+    config = Config(
+        repo=repo,
         label=args.label,
         base_branch=args.base_branch,
         branch_prefix=args.branch_prefix,
@@ -150,7 +152,19 @@ def build_config(argv: Sequence[str] | None = None) -> Config:
         ),
         dry_run=args.dry_run,
         poll_interval_seconds=args.poll_interval,
+        redis_url=redis_url,
+        redis_poll_interval=redis_poll_interval,
         once=args.once,
         daemon=args.daemon,
         max_workers=args.max_workers,
     )
+    validate_config(config)
+    return config
+
+
+def validate_config(config: Config) -> None:
+    if config.redis_url is None and config.repo is None:
+        raise SystemExit(
+            "error: set DISPATCHER_REDIS_URL (Redis mode) "
+            "or DISPATCHER_REPO (single-repo fallback)"
+        )

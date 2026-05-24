@@ -9,12 +9,13 @@ from dispatcher.git import (
 )
 from dispatcher.models import Config, Issue, IssueState
 from dispatcher.runners import build_stage_runners, run_stage
-from dispatcher.state import StateStore
+from dispatcher.state_backend import StateBackend
 from dispatcher.time_utils import utc_now
 
 
-def run_pipeline(issue: Issue, config: Config, store: StateStore) -> IssueState:
-    existing = store.get(config.repo, issue.number)
+def run_pipeline(issue: Issue, config: Config, store: StateBackend) -> IssueState:
+    repo = _require_repo(config)
+    existing = store.get(repo, issue.number)
     if existing and existing.get("status") in {"started", "planned", "built", "failed"}:
         return IssueState(**existing)
 
@@ -30,7 +31,7 @@ def run_pipeline(issue: Issue, config: Config, store: StateStore) -> IssueState:
         worktree=str(worktree),
         updated_at=utc_now(),
     )
-    store.upsert(config.repo, state)
+    store.upsert(repo, state)
 
     try:
         run_stage("worktree", runners["worktree"], issue, config, worktree, branch)
@@ -38,32 +39,38 @@ def run_pipeline(issue: Issue, config: Config, store: StateStore) -> IssueState:
             require_worktree_path(worktree)
         state.status = "worktree_created"
         state.updated_at = utc_now()
-        store.upsert(config.repo, state)
+        store.upsert(repo, state)
 
         run_stage("plan", runners["plan"], issue, config, worktree, branch)
         state.status = "planned"
         state.updated_at = utc_now()
-        store.upsert(config.repo, state)
+        store.upsert(repo, state)
 
         run_stage("build", runners["build"], issue, config, worktree, branch)
         state.status = "built"
         state.updated_at = utc_now()
-        store.upsert(config.repo, state)
+        store.upsert(repo, state)
     except Exception as exc:
         state.status = "failed"
         state.error = str(exc)
         state.updated_at = utc_now()
-        store.upsert(config.repo, state)
+        store.upsert(repo, state)
         raise
 
     return state
 
 
 def first_unstarted_issue(
-    issues: Sequence[Issue], repo: str, store: StateStore
+    issues: Sequence[Issue], repo: str, store: StateBackend
 ) -> Issue | None:
     for issue in issues:
         existing = store.get(repo, issue.number)
         if not existing:
             return issue
     return None
+
+
+def _require_repo(config: Config) -> str:
+    if config.repo is None:
+        raise RuntimeError("pipeline requires a concrete repository")
+    return config.repo
