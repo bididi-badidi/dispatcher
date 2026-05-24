@@ -1,8 +1,7 @@
 ---
-version: 1.1.0
-last_updated: 2026-05-24
+version: 1.0.1
+last_updated: 2026-04-22
 changelog:
-  - 1.1.0: Add sync-check CI enforcement (issue #6)
   - 1.0.1: Compress section 0.1-0.3 to one file hygiene section
   - 1.0.0: Initial release
 ---
