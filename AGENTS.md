@@ -1,7 +1,8 @@
 ---
-version: 1.1.0
-last_updated: 2026-05-11
+version: 1.1.1
+last_updated: 2026-05-21
 changelog:
+  - 1.1.1: Require explicit user instruction before modifying progress.md or task_archive.md
   - 1.1.0: Initial Codex AGENTS.md support
 ---
 
@@ -17,7 +18,7 @@ At the start of every session, read `.ai/assets/PLAN.md`, `.ai/assets/progress.m
 
 - Treat `progress.md` as a high-level contents page.
 - Keep detailed plans, research, and logs in linked files under `.ai/assets/` or `docs/`.
-- Update `progress.md` after significant milestones or task completion.
+- Do not modify `.ai/assets/progress.md` or `.ai/assets/task_archive.md` unless the user explicitly tells you to.
 - Use `.ai/assets/session_notes.md` only for context handover, not as a changelog.
 - See `.ai/assets/examples/session_notes.md` for the session note pattern.
 
@@ -27,17 +28,18 @@ At the start of every session, read `.ai/assets/PLAN.md`, `.ai/assets/progress.m
 
 | File                                 | Purpose                                             | Update Trigger                                                          |
 | ------------------------------------ | --------------------------------------------------- | ----------------------------------------------------------------------- |
-| `.ai/assets/progress.md`             | High-level phase status and major milestones only   | After every significant milestone                                       |
+| `.ai/assets/progress.md`             | High-level phase status and major milestones only   | Only when explicitly instructed                                         |
 | `.ai/assets/session_notes.md`        | Context handover between sessions (not a changelog) | Read at session start; rewrite before ending if critical context exists |
-| `.ai/assets/task_archive.md`         | Completed tasks, moved out of `progress.md`         | Immediately when a task is marked `[x]`                                 |
+| `.ai/assets/task_archive.md`         | Completed tasks, moved out of `progress.md`         | Only when explicitly instructed                                         |
 | `.ai/assets/backlog.md`              | Future tasks not active this session                | When user mentions out-of-scope work                                    |
-| `.ai/assets/branches/<branch-name>/` | Granular sub-tasks for the current branch           | During active branch work; summarise into `progress.md` before merge    |
+| `.ai/assets/branches/<branch-name>/` | Granular sub-tasks for the current branch           | During active branch work; summarise into `progress.md` only if instructed |
 
 Hygiene rules:
 
-- Keep a maximum of 5 active items under "Current Task" in `progress.md`. If a 6th arrives, ask the user which item to defer before accepting it.
-- Move completed tasks (`[x]`) to `task_archive.md` immediately. Do not leave completed work in `progress.md`.
-- Once all goals for a phase are met, strip sub-bullets from `progress.md`. Leave only the phase title, `[x]` status, and a link to the phase document.
+- Do not modify `progress.md` or `task_archive.md` unless the user explicitly tells you to.
+- When explicitly instructed to edit `progress.md`, keep a maximum of 5 active items under "Current Task". If a 6th arrives, ask the user which item to defer before accepting it.
+- When explicitly instructed to archive completed tasks, move completed tasks (`[x]`) to `task_archive.md`. Do not leave completed work in `progress.md`.
+- When explicitly instructed and all goals for a phase are met, strip sub-bullets from `progress.md`. Leave only the phase title, `[x]` status, and a link to the phase document.
 - Session notes are context only. Explain why something looks unconventional, flag fragile code, or list next steps if blocked.
 - At session start, read `session_notes.md`, extract what you need, then clear stale notes before writing your own.
 
