@@ -13,6 +13,10 @@ stops each issue after the build stage opens a PR.
 DISPATCHER_REPO=OWNER/REPO uv run python main.py
 ```
 
+On startup, the dispatcher loads environment defaults from a `.env` file in the
+current dispatcher directory. Variables that are already exported in the shell
+take precedence over `.env` values.
+
 Useful options:
 
 - `--label automate` chooses the trigger label.
