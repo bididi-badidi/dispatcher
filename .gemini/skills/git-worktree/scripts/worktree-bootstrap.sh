@@ -26,6 +26,34 @@ die() {
   exit 1
 }
 
+sync_from_origin() {
+  local current_branch
+
+  git remote get-url origin >/dev/null 2>&1 || {
+    echo "No origin remote configured; skipped source checkout sync"
+    return
+  }
+
+  echo "Fetching origin..."
+  git fetch origin
+
+  current_branch="$(git branch --show-current)"
+  if [[ -z "$current_branch" ]]; then
+    echo "Detached HEAD; fetched origin but skipped merge"
+    return
+  fi
+
+  if git rev-parse --abbrev-ref --symbolic-full-name "@{u}" >/dev/null 2>&1; then
+    echo "Updating $current_branch from upstream..."
+    git merge --ff-only "@{u}"
+  elif git show-ref --verify --quiet "refs/remotes/origin/$current_branch"; then
+    echo "Updating $current_branch from origin/$current_branch..."
+    git merge --ff-only "origin/$current_branch"
+  else
+    echo "No upstream or origin/$current_branch branch found; fetched origin but skipped merge"
+  fi
+}
+
 copy_env_files() {
   local source_dir="$1"
   local target_dir="$2"
@@ -163,6 +191,8 @@ done
 mkdir -p "$(dirname "$target_path")"
 
 if [[ "$mode" == "add" ]]; then
+  sync_from_origin
+
   if git show-ref --verify --quiet "refs/heads/$branch"; then
     [[ -z "$base_ref" ]] || die "--base cannot be used with existing branch: $branch"
     git worktree add "$target_path" "$branch"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shlex
 import subprocess
@@ -40,6 +41,9 @@ class AgentRunner(ABC):
     def command(self, prompt: str, cwd: Path) -> list[str]:
         """Build the provider CLI argv for this provider stage."""
 
+    def command_for(self, issue: Issue, prompt: str, cwd: Path) -> list[str]:
+        return self.command(prompt, cwd)
+
     def env(self) -> dict[str, str] | None:
         return None
 
@@ -66,7 +70,7 @@ class AgentRunner(ABC):
     def run(self, issue: Issue, config: Config, worktree: Path, branch: str) -> None:
         prompt = self.prompt(issue, config, worktree, branch)
         cwd = self.cwd(config, worktree)
-        command = self.command(prompt, cwd)
+        command = self.command_for(issue, prompt, cwd)
         self._validate_command(command)
 
         if config.repo is None:
@@ -160,12 +164,25 @@ class ClaudeRunner(AgentRunner):
             ",".join(CLAUDE_PLAN_DISALLOWED_TOOLS),
         ]
 
+    def command_for(self, issue: Issue, prompt: str, cwd: Path) -> list[str]:
+        command = self.command(prompt, cwd)
+        if issue.plan_model:
+            logging.getLogger(__name__).info(
+                "[planning] model escalated to %s (label: automate:opus)",
+                issue.plan_model,
+            )
+            command = [*command, "--model", issue.plan_model]
+        return command
+
     def stdin(self, prompt: str) -> str:
         return prompt
 
 
 class ClaudeReviewRunner(ClaudeRunner):
     stage_name = "review"
+
+    def command_for(self, issue: Issue, prompt: str, cwd: Path) -> list[str]:
+        return AgentRunner.command_for(self, issue, prompt, cwd)
 
     def command(self, prompt: str, cwd: Path) -> list[str]:
         return [
