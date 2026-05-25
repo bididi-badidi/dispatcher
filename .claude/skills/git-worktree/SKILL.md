@@ -1,6 +1,6 @@
 ---
 name: git-worktree
-version: 1.2.0
+version: 1.1.1
 description: "Use this skill when creating or preparing an isolated Git worktree with the repository bootstrap script. Triggers: 'create a worktree', 'new worktree', 'set up a worktree', 'work on this in a separate checkout', 'bootstrap worktree', 'copy env files to worktree', 'install dependencies in worktree'. Do NOT use for general Git branching, commits, pull requests, or merge conflict workflows; use git-workflow for those."
 ---
 
@@ -53,33 +53,19 @@ script_path="<skill-directory>/scripts/worktree-bootstrap.sh"
 
 ## Create a New Worktree
 
-Run the bootstrap script from the repository root when the user wants a new
-worktree. For a NEW branch, default the base ref to `dev` so feature work
-branches from the integration branch rather than from whichever branch the
-current checkout happens to be on:
-
-```bash
-"$script_path" add <target_path> <branch> --base dev
-```
-
-Override the default only when the user explicitly names a different base ref
-such as a release branch:
-
-```bash
-"$script_path" add <target_path> <branch> --base <ref>
-```
-
-If the branch already exists, do not pass `--base`. The script rejects `--base`
-for existing branches:
+Run the bootstrap script from the repository root when the user wants a new worktree:
 
 ```bash
 "$script_path" add <target_path> <branch>
 ```
 
-Before passing `--base dev`, confirm `dev` exists locally with
-`git show-ref --verify --quiet refs/heads/dev` or `git rev-parse --verify dev`.
-If `dev` is not present in the current checkout, fetch it with
-`git fetch origin dev:dev` or fall back to `main` and tell the user why.
+If the branch should start from a specific base ref, pass `--base`:
+
+```bash
+"$script_path" add <target_path> <branch> --base <ref>
+```
+
+If the branch already exists, do not pass `--base`. The script rejects `--base` for existing branches.
 
 ## Replicate Git-Ignored Files
 
@@ -148,7 +134,7 @@ Response workflow:
 
 ```bash
 script_path="<skill-directory>/scripts/worktree-bootstrap.sh"
-"$script_path" add ../my-repo/feat/new-feat feat/new-feat --base dev
+"$script_path" add ../my-repo/feat/new-feat feat/new-feat
 ```
 
 Expected result: the script creates `../my-repo/feat/new-feat`, checks out `feat/new-feat`, copies `.env` files from the repository root, and installs dependencies. The resulting tree includes `my-repo/main`, `my-repo/dev` when created, and `my-repo/feat/new-feat`.
@@ -175,7 +161,6 @@ Expected result: the script copies `.env` files into the existing worktree and i
 | Manually run `git worktree add`, copy `.env`, and install dependencies as separate ad hoc steps. | Use `scripts/worktree-bootstrap.sh` so setup is repeatable. |
 | Print `.env` contents to prove files copied. | List filenames only. Never display secret values. |
 | Pass `--base` when checking out an existing branch. | Omit `--base` for existing branches. |
-| Create a new branch without `--base`, silently rooting it on the current HEAD. | Pass `--base dev` for new branches unless the user names a different base. |
 | Skip dependency installation by default. | Install dependencies unless the user asks for `--no-install`. |
 | Invent a branch name that ignores the user's requested branch. | Use the user's branch name when provided. |
 | Flatten branch paths into names like `my-repo-feat-new-feat`. | Preserve the project tree: `my-repo/feat/new-feat`. |
