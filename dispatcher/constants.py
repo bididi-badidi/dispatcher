@@ -3,6 +3,8 @@ from __future__ import annotations
 DEFAULT_STATE_FILE = ".dispatcher/state.json"
 DEFAULT_LOG_DIR = ".dispatcher/logs"
 DEFAULT_LABEL = "automate"
+DEFAULT_OPUS_LABEL = "automate:opus"
+DEFAULT_PLAN_OPUS_MODEL = "claude-opus-4-7"
 DEFAULT_BASE_BRANCH = "main"
 DEFAULT_BRANCH_PREFIX = "feat/issue-"
 DEFAULT_POLL_INTERVAL_SECONDS = 120.0

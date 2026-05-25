@@ -23,7 +23,7 @@ async def async_run_stage(
 
     prompt = runner.prompt(issue, config, worktree, branch)
     cwd = runner.cwd(config, worktree)
-    command = runner.command(prompt, cwd)
+    command = runner.command_for(issue, prompt, cwd)
     runner._validate_command(command)
 
     if config.repo is None:

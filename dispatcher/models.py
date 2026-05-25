@@ -9,6 +9,7 @@ class Issue:
     number: int
     title: str
     url: str
+    plan_model: str | None = None
 
 
 @dataclass(frozen=True)
@@ -30,6 +31,8 @@ class Commands:
 class Config:
     repo: str | None
     label: str
+    opus_label: str
+    opus_model: str
     base_branch: str
     branch_prefix: str
     paths: Paths

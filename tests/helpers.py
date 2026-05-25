@@ -11,6 +11,8 @@ def make_config(
     return Config(
         repo=repo,
         label="automate",
+        opus_label="automate:opus",
+        opus_model="claude-opus-4-7",
         base_branch="main",
         branch_prefix="feat/issue-",
         paths=Paths(
