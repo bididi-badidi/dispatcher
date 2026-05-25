@@ -1,6 +1,6 @@
 # Task Archive
 
-- [x] feat/issue-14: updated README with a simple-loop/daemon architecture diagram, compact default runner summaries, and an agent-project-blueprint setup link. See [plan](.ai/assets/branches/feat/issue-14/plan.md).
+- [x] Issue #24: updated Claude, Gemini, and Codex `git-worktree` skill guidance so new branches default to `--base dev` unless the user names another base. See [plan](.ai/assets/branches/feat/issue-24/plan.md).
 - [x] Config startup fix: load dispatcher defaults from a local `.env` file before CLI/environment defaults are evaluated, while preserving exported shell variables as higher priority. Covered by config regression tests.
 - [x] Issue #9: implemented Redis-backed dynamic repository tracking and shared state with `DISPATCHER_REPO` local fallback, pluggable state backend, repo-scoped daemon dedupe, documentation, and regression tests. See [plan](.ai/assets/branches/feat/issue-9/plan.md).
 - [x] feat/issue-3: implemented LangGraph daemon pipeline integration with worktree, plan, build, parallel plan/quality review, conditional build retry, max-iteration failure, and PR-opening graph nodes. See [plan](.ai/assets/branches/feat/issue-3/plan.md).
