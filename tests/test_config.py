@@ -9,6 +9,7 @@ from unittest.mock import patch
 from dispatcher.config import build_config, load_env_file
 from dispatcher.git import worktree_path_for_issue
 from dispatcher.models import Issue
+from dispatcher.repo_context import config_for_repo
 
 
 class ConfigTests(unittest.TestCase):
@@ -43,6 +44,133 @@ class ConfigTests(unittest.TestCase):
             self.assertFalse(config.once)
             self.assertEqual(config.opus_label, "automate:opus")
             self.assertEqual(config.opus_model, "claude-opus-4-7")
+
+    def test_dispatcher_root_dir_env_overrides_cwd(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cwd_dir = Path(temp_dir) / "cwd"
+            root_dir = Path(temp_dir) / "dispatcher-root"
+            cwd_dir.mkdir()
+            root_dir.mkdir()
+            with (
+                patch("pathlib.Path.cwd", return_value=cwd_dir),
+                patch.dict(
+                    "os.environ",
+                    {
+                        "DISPATCHER_REPO": "owner/target-repo",
+                        "DISPATCHER_ROOT_DIR": str(root_dir),
+                    },
+                    clear=True,
+                ),
+            ):
+                config = build_config([])
+
+            repo_root = (root_dir.parent / "target-repo").resolve()
+            self.assertEqual(config.paths.project_dir, repo_root / "main")
+            self.assertEqual(config.paths.worktree_root, repo_root)
+            self.assertEqual(
+                config.paths.state_file,
+                (root_dir / ".dispatcher" / "state.json").resolve(),
+            )
+            self.assertEqual(
+                config.paths.log_dir,
+                (root_dir / ".dispatcher" / "logs").resolve(),
+            )
+
+    def test_dispatcher_root_dir_unset_falls_back_to_cwd(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dispatcher_dir = Path(temp_dir) / "dispatcher"
+            dispatcher_dir.mkdir()
+            with (
+                patch("pathlib.Path.cwd", return_value=dispatcher_dir),
+                patch.dict(
+                    "os.environ", {"DISPATCHER_REPO": "owner/target-repo"}, clear=True
+                ),
+            ):
+                config = build_config([])
+
+            repo_root = (dispatcher_dir.parent / "target-repo").resolve()
+            self.assertEqual(config.paths.project_dir, repo_root / "main")
+            self.assertEqual(config.paths.worktree_root, repo_root)
+            self.assertEqual(
+                config.paths.state_file,
+                (dispatcher_dir / ".dispatcher" / "state.json").resolve(),
+            )
+
+    def test_dispatcher_root_dir_expands_user_home(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cwd_dir = Path(temp_dir) / "cwd"
+            home_dir = Path(temp_dir) / "home"
+            cwd_dir.mkdir()
+            home_dir.mkdir()
+            with (
+                patch("pathlib.Path.cwd", return_value=cwd_dir),
+                patch.dict(
+                    "os.environ",
+                    {
+                        "HOME": str(home_dir),
+                        "DISPATCHER_REPO": "owner/target-repo",
+                        "DISPATCHER_ROOT_DIR": "~/dispatcher",
+                    },
+                    clear=True,
+                ),
+            ):
+                config = build_config([])
+
+            root_dir = (home_dir / "dispatcher").resolve()
+            self.assertEqual(
+                config.paths.state_file,
+                (root_dir / ".dispatcher" / "state.json").resolve(),
+            )
+
+    def test_dispatcher_root_dir_resolves_relative_paths(self) -> None:
+        previous_cwd = Path.cwd()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.chdir(temp_dir)
+            try:
+                with patch.dict(
+                    "os.environ",
+                    {
+                        "DISPATCHER_REPO": "owner/target-repo",
+                        "DISPATCHER_ROOT_DIR": "relative-dispatcher",
+                    },
+                    clear=True,
+                ):
+                    config = build_config([])
+            finally:
+                os.chdir(previous_cwd)
+
+            root_dir = (Path(temp_dir) / "relative-dispatcher").resolve()
+            self.assertEqual(
+                config.paths.state_file,
+                (root_dir / ".dispatcher" / "state.json").resolve(),
+            )
+            self.assertTrue(config.paths.state_file.is_absolute())
+
+    def test_repo_context_uses_dispatcher_root_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cwd_dir = Path(temp_dir) / "cwd"
+            root_dir = Path(temp_dir) / "dispatcher-root"
+            state_dir = Path(temp_dir) / "custom-state"
+            cwd_dir.mkdir()
+            root_dir.mkdir()
+            state_dir.mkdir()
+            with (
+                patch("pathlib.Path.cwd", return_value=cwd_dir),
+                patch.dict(
+                    "os.environ",
+                    {
+                        "DISPATCHER_REPO": "owner/source-repo",
+                        "DISPATCHER_ROOT_DIR": str(root_dir),
+                    },
+                    clear=True,
+                ),
+            ):
+                config = build_config(["--state-file", str(state_dir / "state.json")])
+                repo_config = config_for_repo(config, "owner/target-repo")
+
+            repo_root = (root_dir.parent / "target-repo").resolve()
+            self.assertEqual(repo_config.paths.project_dir, repo_root / "main")
+            self.assertEqual(repo_config.paths.worktree_root, repo_root)
 
     def test_reads_opus_label_and_model_from_environment(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

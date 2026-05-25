@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+from dispatcher.config import resolve_root_dir
 from dispatcher.git import default_worktree_root, repo_name_from_full_name
 from dispatcher.models import Config, Paths
 
@@ -32,4 +33,4 @@ def config_for_repo(config: Config, repo: str) -> Config:
 def _dispatcher_dir(state_file: Path) -> Path:
     if state_file.parent.name == ".dispatcher":
         return state_file.parent.parent
-    return Path.cwd().resolve()
+    return resolve_root_dir()

@@ -55,6 +55,13 @@ def load_env_file(path: Path | None = None) -> None:
         os.environ.setdefault(key, value)
 
 
+def resolve_root_dir() -> Path:
+    root_dir = os.getenv("DISPATCHER_ROOT_DIR")
+    if root_dir:
+        return Path(root_dir).expanduser().resolve()
+    return Path.cwd().resolve()
+
+
 def _parse_env_line(line: str) -> tuple[str, str] | None:
     stripped = line.strip()
     if not stripped or stripped.startswith("#"):
@@ -167,7 +174,7 @@ def build_config(argv: Sequence[str] | None = None) -> Config:
     )
     args = parser.parse_args(argv)
 
-    dispatcher_dir = Path.cwd().resolve()
+    dispatcher_dir = resolve_root_dir()
     repo = os.getenv("DISPATCHER_REPO")
     redis_url = os.getenv("DISPATCHER_REDIS_URL")
     opus_label = os.getenv("DISPATCHER_OPUS_LABEL", DEFAULT_OPUS_LABEL)
