@@ -1,5 +1,6 @@
 # Task Archive
 
+- [x] Issue #23: added a root `.env.example` template covering dispatcher environment variables, required setup choices, safe secret placeholders, and a README setup pointer. See [plan](.ai/assets/branches/feat/issue-23/plan.md).
 - [x] Config startup fix: load dispatcher defaults from a local `.env` file before CLI/environment defaults are evaluated, while preserving exported shell variables as higher priority. Covered by config regression tests.
 - [x] Issue #9: implemented Redis-backed dynamic repository tracking and shared state with `DISPATCHER_REPO` local fallback, pluggable state backend, repo-scoped daemon dedupe, documentation, and regression tests. See [plan](.ai/assets/branches/feat/issue-9/plan.md).
 - [x] feat/issue-3: implemented LangGraph daemon pipeline integration with worktree, plan, build, parallel plan/quality review, conditional build retry, max-iteration failure, and PR-opening graph nodes. See [plan](.ai/assets/branches/feat/issue-3/plan.md).

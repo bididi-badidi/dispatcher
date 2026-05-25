@@ -15,7 +15,8 @@ DISPATCHER_REPO=OWNER/REPO uv run python main.py
 
 On startup, the dispatcher loads environment defaults from a `.env` file in the
 current dispatcher directory. Variables that are already exported in the shell
-take precedence over `.env` values.
+take precedence over `.env` values. Start from `.env.example` when creating a
+local `.env` file.
 
 Useful options:
 
