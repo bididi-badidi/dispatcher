@@ -1,7 +1,8 @@
 ---
-version: 1.1.1
-last_updated: 2026-05-21
+version: 1.1.2
+last_updated: 2026-05-25
 changelog:
+  - 1.1.2: Require archive entries moved to task_archive.md to already exist in progress.md
   - 1.1.1: Require explicit user instruction before modifying progress.md or task_archive.md
   - 1.1.0: Initial Codex AGENTS.md support
 ---
@@ -39,6 +40,7 @@ Hygiene rules:
 - Do not modify `progress.md` or `task_archive.md` unless the user explicitly tells you to.
 - When explicitly instructed to edit `progress.md`, keep a maximum of 5 active items under "Current Task". If a 6th arrives, ask the user which item to defer before accepting it.
 - When explicitly instructed to archive completed tasks, move completed tasks (`[x]`) to `task_archive.md`. Do not leave completed work in `progress.md`.
+- Only tasks currently listed in `progress.md` are eligible to be moved to `task_archive.md`. Do not archive tasks that were never on `progress.md`; this preserves the active-to-archive audit trail.
 - When explicitly instructed and all goals for a phase are met, strip sub-bullets from `progress.md`. Leave only the phase title, `[x]` status, and a link to the phase document.
 - Session notes are context only. Explain why something looks unconventional, flag fragile code, or list next steps if blocked.
 - At session start, read `session_notes.md`, extract what you need, then clear stale notes before writing your own.
