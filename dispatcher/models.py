@@ -44,6 +44,8 @@ class Config:
     once: bool = False
     daemon: bool = False
     max_workers: int = 3
+    s3_log_bucket: str | None = None
+    s3_log_key_prefix: str = ""
 
 
 @dataclass

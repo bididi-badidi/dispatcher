@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -220,3 +221,56 @@ class RunnerTests(unittest.TestCase):
             (worktree / ".git").mkdir()
 
             self.assertEqual(codex_git_write_dirs(worktree), [])
+
+    def test_stage_log_uploads_when_bucket_configured(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            worktree = Path(temp_dir)
+            config = replace(
+                make_config(worktree),
+                s3_log_bucket="dispatcher-logs",
+            )
+            runner = GeminiRunner("worktree $issue_number")
+            calls = []
+
+            class FakeBackground:
+                def submit_stage_upload(self, uploader, repo, issue, stage, path):
+                    calls.append((uploader, repo, issue, stage, path))
+
+            with (
+                patch("dispatcher.runners.uploader_from_config", return_value=object()),
+                patch(
+                    "dispatcher.background.get_default_background",
+                    return_value=FakeBackground(),
+                ),
+                patch.object(GeminiRunner, "version", return_value="gemini 1.0"),
+            ):
+                runner.run(
+                    Issue(8, "Upload", "https://example.test/8"),
+                    config,
+                    worktree,
+                    "feat/issue-8",
+                )
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][1:4], ("example/repo", 8, "worktree"))
+        self.assertEqual(calls[0][4].name, "issue-8-worktree.log")
+
+    def test_no_upload_when_bucket_unset(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            worktree = Path(temp_dir)
+            config = make_config(worktree)
+            runner = GeminiRunner("worktree $issue_number")
+
+            with (
+                patch("dispatcher.runners.uploader_from_config", return_value=None),
+                patch("dispatcher.background.get_default_background") as background,
+                patch.object(GeminiRunner, "version", return_value="gemini 1.0"),
+            ):
+                runner.run(
+                    Issue(8, "Upload", "https://example.test/8"),
+                    config,
+                    worktree,
+                    "feat/issue-8",
+                )
+
+        background.assert_not_called()

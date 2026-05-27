@@ -7,6 +7,7 @@ from pathlib import Path
 
 from dispatcher.models import Config, Issue
 from dispatcher.runners import AgentRunner
+from dispatcher.s3_logs import uploader_from_config
 from dispatcher.subprocess_utils import print_subprocess_command
 
 
@@ -41,6 +42,7 @@ async def async_run_stage(
             f"DRY RUN: {command_text}{stdin_log}\n\n[version]\n{version}\n",
             encoding="utf-8",
         )
+        _submit_stage_upload(config, issue.number, runner.stage_name, log_path)
         return ""
 
     print_subprocess_command(command)
@@ -63,9 +65,26 @@ async def async_run_stage(
         f"{stdout_text}\n\n[stderr]\n{stderr_text}",
         encoding="utf-8",
     )
+    _submit_stage_upload(config, issue.number, runner.stage_name, log_path)
     if proc.returncode != 0:
         raise RuntimeError(
             f"{runner.stage_name} stage failed with exit code "
             f"{proc.returncode}; see {log_path}"
         )
     return stdout_text
+
+
+def _submit_stage_upload(
+    config: Config, issue_number: int, stage_name: str, log_path: Path
+) -> None:
+    if config.repo is None:
+        return
+    uploader = uploader_from_config(config)
+    if uploader is None:
+        return
+
+    from dispatcher.background import get_default_background
+
+    get_default_background().submit_stage_upload(
+        uploader, config.repo, issue_number, stage_name, log_path
+    )

@@ -27,6 +27,7 @@ from dispatcher.runners import (
     GeminiPrRunner,
     build_stage_runners,
 )
+from dispatcher.s3_logs import issue_stage_log_paths, uploader_from_config
 from dispatcher.state_backend import StateBackend
 from dispatcher.time_utils import utc_now
 
@@ -140,9 +141,12 @@ async def async_run_langgraph_pipeline(
         failed_state["error"] = str(exc)
         failed_state["worker_id"] = None
         _persist_state(config, store, failed_state)
+        _submit_issue_upload(config, issue.number)
         raise
 
-    return _persist_state(config, store, final_state)
+    persisted_state = _persist_state(config, store, final_state)
+    _submit_issue_upload(config, issue.number)
+    return persisted_state
 
 
 def _build_graph(
@@ -415,3 +419,19 @@ def _require_repo(config: Config) -> str:
     if config.repo is None:
         raise RuntimeError("pipeline requires a concrete repository")
     return config.repo
+
+
+def _submit_issue_upload(config: Config, issue_number: int) -> None:
+    repo = _require_repo(config)
+    uploader = uploader_from_config(config)
+    if uploader is None:
+        return
+    stage_paths = issue_stage_log_paths(config.paths.log_dir, repo, issue_number)
+    if not stage_paths:
+        return
+
+    from dispatcher.background import get_default_background
+
+    get_default_background().submit_issue_upload(
+        uploader, repo, issue_number, stage_paths
+    )
