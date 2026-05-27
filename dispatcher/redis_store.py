@@ -25,6 +25,12 @@ class RedisStateStore:
         repos = self._client.smembers(_REPOS_KEY)
         return sorted(_decode(value) for value in repos)
 
+    def add_repo(self, repo: str) -> int:
+        return int(self._client.sadd(_REPOS_KEY, repo))
+
+    def remove_repo(self, repo: str) -> int:
+        return int(self._client.srem(_REPOS_KEY, repo))
+
     def get(self, repo: str, issue_number: int) -> dict[str, Any] | None:
         payload = self._client.get(_state_key(repo, issue_number))
         if payload is None:

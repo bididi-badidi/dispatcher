@@ -30,6 +30,28 @@ class RedisStateStoreTests(unittest.TestCase):
 
         self.assertEqual(store.get_repos(), [])
 
+    def test_add_repo_writes_to_repo_set(self) -> None:
+        client = MagicMock()
+        client.sadd.side_effect = [1, 0]
+
+        with patch("dispatcher.redis_store.redis.from_url", return_value=client):
+            store = RedisStateStore("redis://example")
+
+        self.assertEqual(store.add_repo("owner/repo"), 1)
+        self.assertEqual(store.add_repo("owner/repo"), 0)
+        client.sadd.assert_called_with("dispatcher:repos", "owner/repo")
+
+    def test_remove_repo_writes_to_repo_set(self) -> None:
+        client = MagicMock()
+        client.srem.side_effect = [1, 0]
+
+        with patch("dispatcher.redis_store.redis.from_url", return_value=client):
+            store = RedisStateStore("redis://example")
+
+        self.assertEqual(store.remove_repo("owner/repo"), 1)
+        self.assertEqual(store.remove_repo("owner/repo"), 0)
+        client.srem.assert_called_with("dispatcher:repos", "owner/repo")
+
     def test_get_returns_none_when_missing(self) -> None:
         client = MagicMock()
         client.get.return_value = None

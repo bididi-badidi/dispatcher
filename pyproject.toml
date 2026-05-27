@@ -9,6 +9,12 @@ dependencies = [
     "redis[hiredis]>=5.0",
 ]
 
+[project.scripts]
+dispatcher-repos = "dispatcher.repos_cli:main"
+
+[tool.uv]
+package = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
