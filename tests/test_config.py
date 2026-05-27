@@ -76,6 +76,29 @@ class ConfigTests(unittest.TestCase):
                 (root_dir / ".dispatcher" / "logs").resolve(),
             )
 
+    def test_projects_dir_env_overrides_inferred_repo_parent(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dispatcher_dir = Path(temp_dir) / "dispatcher"
+            projects_dir = Path(temp_dir) / "custom-projects"
+            dispatcher_dir.mkdir()
+            projects_dir.mkdir()
+            with (
+                patch("pathlib.Path.cwd", return_value=dispatcher_dir),
+                patch.dict(
+                    "os.environ",
+                    {
+                        "DISPATCHER_REPO": "owner/target-repo",
+                        "DISPATCHER_PROJECTS_DIR": str(projects_dir),
+                    },
+                    clear=True,
+                ),
+            ):
+                config = build_config([])
+
+            repo_root = (projects_dir / "target-repo").resolve()
+            self.assertEqual(config.paths.project_dir, repo_root / "main")
+            self.assertEqual(config.paths.worktree_root, repo_root)
+
     def test_dispatcher_root_dir_unset_falls_back_to_cwd(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             dispatcher_dir = Path(temp_dir) / "dispatcher"
@@ -169,6 +192,32 @@ class ConfigTests(unittest.TestCase):
                 repo_config = config_for_repo(config, "owner/target-repo")
 
             repo_root = (root_dir.parent / "target-repo").resolve()
+            self.assertEqual(repo_config.paths.project_dir, repo_root / "main")
+            self.assertEqual(repo_config.paths.worktree_root, repo_root)
+
+    def test_repo_context_uses_projects_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dispatcher_dir = Path(temp_dir) / "dispatcher"
+            projects_dir = Path(temp_dir) / "custom-projects"
+            state_dir = Path(temp_dir) / "custom-state"
+            dispatcher_dir.mkdir()
+            projects_dir.mkdir()
+            state_dir.mkdir()
+            with (
+                patch("pathlib.Path.cwd", return_value=dispatcher_dir),
+                patch.dict(
+                    "os.environ",
+                    {
+                        "DISPATCHER_REPO": "owner/source-repo",
+                        "DISPATCHER_PROJECTS_DIR": str(projects_dir),
+                    },
+                    clear=True,
+                ),
+            ):
+                config = build_config(["--state-file", str(state_dir / "state.json")])
+                repo_config = config_for_repo(config, "owner/target-repo")
+
+            repo_root = (projects_dir / "target-repo").resolve()
             self.assertEqual(repo_config.paths.project_dir, repo_root / "main")
             self.assertEqual(repo_config.paths.worktree_root, repo_root)
 

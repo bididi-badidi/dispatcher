@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from dispatcher.config import resolve_root_dir
+from dispatcher.config import resolve_projects_dir, resolve_root_dir
 from dispatcher.git import default_worktree_root, repo_name_from_full_name
 from dispatcher.models import Config, Paths
 
@@ -14,8 +14,9 @@ def config_for_repo(config: Config, repo: str) -> Config:
 
     dispatcher_dir = _dispatcher_dir(config.paths.state_file)
     repo_name = repo_name_from_full_name(repo)
+    projects_dir = resolve_projects_dir(dispatcher_dir, config.base_branch)
     worktree_root = default_worktree_root(
-        dispatcher_dir, repo_name, config.base_branch
+        dispatcher_dir, repo_name, config.base_branch, projects_dir
     ).resolve()
     project_dir = (worktree_root / config.base_branch).resolve()
     return replace(
