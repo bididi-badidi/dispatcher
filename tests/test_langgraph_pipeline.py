@@ -9,9 +9,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 from dispatcher.langgraph_pipeline import async_run_langgraph_pipeline
-from dispatcher.models import Issue
-from dispatcher.queue import Task
+from dispatcher.models import Issue, IssueState
+from dispatcher.queue import Task, TaskType
 from dispatcher.state import StateStore
+from dispatcher.time_utils import utc_now
 from tests.helpers import make_config
 
 
@@ -68,6 +69,57 @@ class LangGraphPipelineTests(unittest.TestCase):
                 self.assertEqual(saved["status"], "pr_opened")
                 self.assertEqual(saved["plan_review"], "approved")
                 self.assertEqual(saved["quality_review"], "approved")
+
+        asyncio.run(scenario())
+
+    def test_review_task_reuses_existing_pr(self) -> None:
+        async def scenario() -> None:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                config = make_config(root)
+                store = StateStore(config.paths.state_file)
+                issue = Issue(9, "Address review", "https://example.test/9")
+                store.upsert(
+                    config.repo,
+                    IssueState(
+                        number=9,
+                        title=issue.title,
+                        url=issue.url,
+                        status="pr_review_queued",
+                        branch="feat/issue-9",
+                        worktree=str(root.parent / "feat" / "issue-9"),
+                        updated_at=utc_now(),
+                        build_feedback="Please add coverage.",
+                        pr_url="https://github.com/example/repo/pull/99",
+                        pr_review_cursor=55,
+                    ),
+                )
+                calls: list[str] = []
+
+                async def run_stage(name, runner, issue, config, worktree, branch):
+                    calls.append(name)
+                    if name in {"review_plan", "review_quality"}:
+                        return "VERDICT: approved\n"
+                    return ""
+
+                with patch(
+                    "dispatcher.langgraph_pipeline.async_run_stage",
+                    side_effect=run_stage,
+                ):
+                    state = await async_run_langgraph_pipeline(
+                        Task(config.repo, issue, TaskType.REVIEW),
+                        config,
+                        store,
+                        0,
+                        asyncio.Event(),
+                    )
+
+                self.assertEqual(state.status, "pr_opened")
+                self.assertEqual(
+                    state.pr_url, "https://github.com/example/repo/pull/99"
+                )
+                self.assertEqual(state.pr_review_cursor, 55)
+                self.assertNotIn("open_pr", calls)
 
         asyncio.run(scenario())
 
