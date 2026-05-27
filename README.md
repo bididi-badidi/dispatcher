@@ -67,9 +67,11 @@ Useful options:
 - `DISPATCHER_REPO=OWNER/REPO` keeps the single-repository local JSON fallback
   when Redis is not configured.
 - `--base-branch main` chooses the branch used for the worktree.
-- The base checkout defaults to `/Projects/{repo_name}/main` when the
-  dispatcher is run from `/Projects/dispatcher` or `/Projects/dispatcher/main`.
+- The base checkout defaults to `/Projects/{repo_name}/main` regardless of
+  where the dispatcher is run.
 - New worktrees default to `/Projects/{repo_name}/{branch_name}`.
+- `DISPATCHER_PROJECTS_DIR` changes the repo/worktree root parent; it is
+  independent of `DISPATCHER_ROOT_DIR`.
 - Dispatcher state and logs stay under the dispatcher directory by default.
 - `--poll-interval 120` chooses the delay between polling cycles, in seconds.
   It can also be set with `DISPATCHER_POLL_INTERVAL_SECONDS`.
@@ -104,12 +106,28 @@ DISPATCHER_REPO=OWNER/REPO uv run python main.py --daemon --max-workers 3
 Redis-backed daemon mode polls every repository currently registered in Redis:
 
 ```bash
+DISPATCHER_REDIS_URL=redis://localhost:6379/0 uv run dispatcher-repos add OWNER/REPO
+DISPATCHER_REDIS_URL=redis://localhost:6379/0 uv run dispatcher-repos list
 DISPATCHER_REDIS_URL=redis://localhost:6379/0 uv run python main.py --daemon
 ```
 
+Use `dispatcher-repos add` before starting Redis-backed polling. The command is
+the supported way to populate the dispatcher's tracked repository set without
+calling `redis-cli SADD` directly. To stop polling a repository, run:
+
+```bash
+DISPATCHER_REDIS_URL=redis://localhost:6379/0 uv run dispatcher-repos remove OWNER/REPO
+```
+
 Issue state is terminal once a record exists, including `failed` records. The
-poller will not automatically retry failed issues; clear or edit the relevant
-entry in `.dispatcher/state.json` before reprocessing an issue.
+poller will not automatically retry failed issues. When using the local JSON
+fallback, clear or edit the relevant entry in `.dispatcher/state.json` before
+reprocessing an issue. When using Redis-backed state, delete the matching
+`dispatcher:state:{owner/repo}:{issue_number}` key instead, for example:
+
+```bash
+redis-cli DEL 'dispatcher:state:OWNER/REPO:123'
+```
 
 Issues with both the main trigger label, `automate` by default, and the
 secondary `automate:opus` label run the planning stage with
