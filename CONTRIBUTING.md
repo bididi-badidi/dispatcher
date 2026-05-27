@@ -30,6 +30,29 @@ uv run detect-secrets scan --exclude-files '^(\.agents/|\.env|\.venv/|\.dispatch
 Never commit real credentials. Keep local configuration in `.env`, which is
 gitignored.
 
+### Troubleshooting: `detect-secrets` modified `.secrets.baseline`
+
+If pre-commit fails locally or in CI with:
+
+```text
+Detect secrets...........................................................Failed
+- hook id: detect-secrets
+- files were modified by this hook
+```
+
+the baseline has drifted, usually because line numbers of a previously flagged
+literal moved or a new high-entropy literal landed. Recover with:
+
+```bash
+uv run detect-secrets scan --exclude-files '^(\.agents/|\.env|\.venv/|\.dispatcher/|\.ai/assets/session_notes\.md)$' > .secrets.baseline
+git add .secrets.baseline
+```
+
+If the rescan adds a `results` entry for a literal you know is not a secret,
+such as a test fixture, fake environment value, or sample payload, annotate the
+source line with `# pragma: allowlist secret` and rescan. Real credentials must
+never be committed; rotate them and add them to `.env`, which is gitignored.
+
 ## Branching Strategy
 
 Use short-lived feature branches and open pull requests directly to `main`:
