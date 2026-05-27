@@ -1,0 +1,35 @@
+name: Branch Policy
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+    branches: [main, dev]
+
+permissions:
+  contents: read
+
+jobs:
+  branch-policy:
+    name: branch-policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Enforce branch policy
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          echo "PR: ${HEAD_REF} -> ${BASE_REF}"
+
+          if [ "${BASE_REF}" = "main" ] && [ "${HEAD_REF}" != "dev" ]; then
+            echo "::error::PRs into main are only allowed from dev (got '${HEAD_REF}')."
+            exit 1
+          fi
+
+          if [ "${BASE_REF}" = "dev" ] && [ "${HEAD_REF}" = "main" ]; then
+            echo "::error::Reverse merge main -> dev is not allowed."
+            exit 1
+          fi
+
+          echo "Branch policy OK."

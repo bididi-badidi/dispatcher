@@ -168,6 +168,10 @@ agent subprocess.
 
 ## Development
 
+Branching policy: feature branches merge into `dev`; only `dev` merges into
+`main`. This is enforced by the `branch-policy` workflow. See
+[CONTRIBUTING.md](CONTRIBUTING.md#branching-strategy).
+
 ```bash
 uv run ruff format .
 uv run ruff check .
