@@ -106,7 +106,17 @@ DISPATCHER_REPO=OWNER/REPO uv run python main.py --daemon --max-workers 3
 Redis-backed daemon mode polls every repository currently registered in Redis:
 
 ```bash
+DISPATCHER_REDIS_URL=redis://localhost:6379/0 uv run dispatcher-repos add OWNER/REPO
+DISPATCHER_REDIS_URL=redis://localhost:6379/0 uv run dispatcher-repos list
 DISPATCHER_REDIS_URL=redis://localhost:6379/0 uv run python main.py --daemon
+```
+
+Use `dispatcher-repos add` before starting Redis-backed polling. The command is
+the supported way to populate the dispatcher's tracked repository set without
+calling `redis-cli SADD` directly. To stop polling a repository, run:
+
+```bash
+DISPATCHER_REDIS_URL=redis://localhost:6379/0 uv run dispatcher-repos remove OWNER/REPO
 ```
 
 Issue state is terminal once a record exists, including `failed` records. The
