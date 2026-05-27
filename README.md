@@ -1,11 +1,47 @@
 # Dispatcher
 
-Local issue-triggered automation dispatcher for the Phase 1 happy path in
+Local issue-triggered automation dispatcher described in
 [`.ai/assets/PLAN.md`](.ai/assets/PLAN.md).
 
 The dispatcher long-polls GitHub for open issues with the trigger label,
-records state locally, runs the three planned agent stages in sequence, and
-stops each issue after the build stage opens a PR.
+records state locally, and runs labelled issues through either the simple loop
+or daemon worker pipeline until PR creation.
+
+## Architecture
+
+```
+Issue (labelled automate)
+        |
+        v
+   GitHub Poller
+        |
+   +----+----+
+Simple      Daemon (--daemon)
+  loop       |
+        AsyncIO worker pool
+             |
+        LangGraph pipeline
+        +------------------+
+        | worktree -> plan |
+        | -> build -> review |
+        | -> (retry) -> PR |
+        +------------------+
+```
+
+The simple loop processes each newly labelled issue through the worktree,
+planning, and build stages in order, then stops after PR creation.
+
+Daemon mode keeps the same polling source and stage runners, but uses an
+`asyncio` worker pool and LangGraph pipeline to run issue work concurrently with
+review and retry steps.
+
+## Agent setup
+
+Agent configuration (`.ai/` directory layout, `CLAUDE.md`, `GEMINI.md`, and
+skills) follows the
+[bididi-badidi/agent-project-blueprint](https://github.com/bididi-badidi/agent-project-blueprint).
+Clone or reference that repo to replicate the same agent behavior in a new
+project.
 
 ## Usage
 
@@ -21,6 +57,10 @@ local `.env` file.
 Useful options:
 
 - `--label automate` chooses the trigger label.
+- `DISPATCHER_OPUS_LABEL=automate:opus` chooses the secondary label that
+  escalates only the planning stage to Opus.
+- `DISPATCHER_OPUS_MODEL=claude-opus-4-7` chooses the Claude model used when
+  the Opus escalation label is present.
 - `DISPATCHER_REDIS_URL=redis://...` enables Redis-backed repository tracking
   and shared issue state. Repositories are read from the `dispatcher:repos`
   Redis set.
@@ -71,6 +111,11 @@ Issue state is terminal once a record exists, including `failed` records. The
 poller will not automatically retry failed issues; clear or edit the relevant
 entry in `.dispatcher/state.json` before reprocessing an issue.
 
+Issues with both the main trigger label, `automate` by default, and the
+secondary `automate:opus` label run the planning stage with
+`claude-opus-4-7`. Worktree creation and build stages keep their normal
+provider defaults.
+
 ## Stage Prompts
 
 Each stage has a provider-specific subprocess runner. The runner owns the safe
@@ -93,29 +138,12 @@ publishes the local branch before the PR is opened.
 
 The default runners use:
 
-- Gemini: `gemini --approval-mode auto_edit --allowed-tools ... --prompt`.
-  The allowlist includes Gemini's real filesystem/search/fetch tool names
-  (`list_directory`, `read_file`, `read_many_files`, `glob`, `grep_search`,
-  `web_fetch`), `activate_skill`, and `run_shell_command` for the
-  skill-driven worktree bootstrap flow. Scoped `run_shell_command(...)`
-  prefixes remain listed as documentation for the common git, worktree setup,
-  dependency install, and shell inspection commands.
-  The dispatcher does not pass `--sandbox` to Gemini and removes inherited
-  Gemini sandbox environment variables so macOS Seatbelt does not restrict
-  worktree creation outside `/Projects/{repo_name}/main`.
-- Claude: `printf '%s\n' '<prompt>' | claude --print --permission-mode acceptEdits --allowedTools ... --disallowedTools ...`.
-  The planning runner only pre-approves reads, issue/codebase inspection
-  commands, read-only `gh` commands, and writes under `.ai/assets/branches/`;
-  mutating `gh` commands and destructive shell commands such as `rm`, hard
-  resets, forced pushes, and delete-style commands are explicitly denied.
-- Codex: `codex exec --sandbox workspace-write --config sandbox_workspace_write.network_access=true --config sandbox_workspace_write.writable_roots=[...] --add-dir <git-dir> --cd <worktree>`.
-  For linked worktrees, the runner reads the worktree `.git` metadata and grants
-  both its per-worktree Git admin directory and shared Git directory when they
-  sit outside Codex's writable workspace root. It passes those roots through
-  both the Codex workspace-write config and `--add-dir` so linked-worktree Git
-  index and ref updates can write their admin metadata. Network access stays
-  enabled for the build stage because Codex is expected to push its branch and
-  open a PR.
+- Gemini creates the worktree and copies `.env` files via the git-worktree
+  skill; it runs with `--approval-mode auto_edit`.
+- Claude reads the issue and writes the feature plan into
+  `.ai/assets/branches/`; it is restricted to read and plan-asset-write work.
+- Codex implements the plan, commits on the feature branch, and opens the PR;
+  it runs with network access enabled for push and PR creation.
 
 The dispatcher rejects yolo or dangerous skip/bypass flags before launching any
 agent subprocess.
