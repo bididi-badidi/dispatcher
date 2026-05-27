@@ -67,9 +67,11 @@ Useful options:
 - `DISPATCHER_REPO=OWNER/REPO` keeps the single-repository local JSON fallback
   when Redis is not configured.
 - `--base-branch main` chooses the branch used for the worktree.
-- The base checkout defaults to `/Projects/{repo_name}/main` when the
-  dispatcher is run from `/Projects/dispatcher` or `/Projects/dispatcher/main`.
+- The base checkout defaults to `/Projects/{repo_name}/main` regardless of
+  where the dispatcher is run.
 - New worktrees default to `/Projects/{repo_name}/{branch_name}`.
+- `DISPATCHER_PROJECTS_DIR` changes the repo/worktree root parent; it is
+  independent of `DISPATCHER_ROOT_DIR`.
 - Dispatcher state and logs stay under the dispatcher directory by default.
 - `--poll-interval 120` chooses the delay between polling cycles, in seconds.
   It can also be set with `DISPATCHER_POLL_INTERVAL_SECONDS`.

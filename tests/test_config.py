@@ -25,7 +25,7 @@ class ConfigTests(unittest.TestCase):
             ):
                 config = build_config([])
 
-            repo_root = (dispatcher_dir.parent / "target-repo").resolve()
+            repo_root = (Path("/Projects") / "target-repo").resolve()
             self.assertEqual(config.paths.project_dir, repo_root / "main")
             self.assertEqual(config.paths.worktree_root, repo_root)
             self.assertEqual(
@@ -64,7 +64,7 @@ class ConfigTests(unittest.TestCase):
             ):
                 config = build_config([])
 
-            repo_root = (root_dir.parent / "target-repo").resolve()
+            repo_root = (Path("/Projects") / "target-repo").resolve()
             self.assertEqual(config.paths.project_dir, repo_root / "main")
             self.assertEqual(config.paths.worktree_root, repo_root)
             self.assertEqual(
@@ -76,7 +76,7 @@ class ConfigTests(unittest.TestCase):
                 (root_dir / ".dispatcher" / "logs").resolve(),
             )
 
-    def test_projects_dir_env_overrides_inferred_repo_parent(self) -> None:
+    def test_projects_dir_env_overrides_default_repo_parent(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             dispatcher_dir = Path(temp_dir) / "dispatcher"
             projects_dir = Path(temp_dir) / "custom-projects"
@@ -111,7 +111,7 @@ class ConfigTests(unittest.TestCase):
             ):
                 config = build_config([])
 
-            repo_root = (dispatcher_dir.parent / "target-repo").resolve()
+            repo_root = (Path("/Projects") / "target-repo").resolve()
             self.assertEqual(config.paths.project_dir, repo_root / "main")
             self.assertEqual(config.paths.worktree_root, repo_root)
             self.assertEqual(
@@ -169,7 +169,7 @@ class ConfigTests(unittest.TestCase):
             )
             self.assertTrue(config.paths.state_file.is_absolute())
 
-    def test_repo_context_uses_dispatcher_root_dir(self) -> None:
+    def test_repo_context_ignores_dispatcher_root_dir_for_repo_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             cwd_dir = Path(temp_dir) / "cwd"
             root_dir = Path(temp_dir) / "dispatcher-root"
@@ -191,7 +191,7 @@ class ConfigTests(unittest.TestCase):
                 config = build_config(["--state-file", str(state_dir / "state.json")])
                 repo_config = config_for_repo(config, "owner/target-repo")
 
-            repo_root = (root_dir.parent / "target-repo").resolve()
+            repo_root = (Path("/Projects") / "target-repo").resolve()
             self.assertEqual(repo_config.paths.project_dir, repo_root / "main")
             self.assertEqual(repo_config.paths.worktree_root, repo_root)
 
@@ -242,7 +242,7 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(config.opus_label, "needs-opus")
             self.assertEqual(config.opus_model, "claude-opus-4-5")
 
-    def test_defaults_to_sibling_repo_from_dispatcher_worktree(self) -> None:
+    def test_repo_paths_do_not_derive_from_dispatcher_worktree(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             dispatcher_main = Path(temp_dir) / "dispatcher" / "main"
             dispatcher_main.mkdir(parents=True)
@@ -254,7 +254,7 @@ class ConfigTests(unittest.TestCase):
             ):
                 config = build_config([])
 
-            repo_root = (Path(temp_dir) / "target-repo").resolve()
+            repo_root = (Path("/Projects") / "target-repo").resolve()
             self.assertEqual(config.paths.project_dir, repo_root / "main")
             self.assertEqual(config.paths.worktree_root, repo_root)
             self.assertEqual(

@@ -69,18 +69,12 @@ def repo_name_from_full_name(repo: str) -> str:
     return repo.rsplit("/", maxsplit=1)[-1]
 
 
-def default_projects_dir(dispatcher_dir: Path, base_branch: str) -> Path:
-    if dispatcher_dir.name == base_branch:
-        return dispatcher_dir.parent.parent
-    return dispatcher_dir.parent
+def default_projects_dir() -> Path:
+    return Path("/Projects")
 
 
 def default_worktree_root(
-    dispatcher_dir: Path,
     repo_name: str,
-    base_branch: str,
     projects_dir: Path | None = None,
 ) -> Path:
-    return (
-        projects_dir or default_projects_dir(dispatcher_dir, base_branch)
-    ) / repo_name
+    return (projects_dir or default_projects_dir()) / repo_name

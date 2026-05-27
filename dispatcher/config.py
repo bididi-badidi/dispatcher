@@ -66,11 +66,11 @@ def resolve_root_dir() -> Path:
     return Path.cwd().resolve()
 
 
-def resolve_projects_dir(dispatcher_dir: Path, base_branch: str) -> Path:
+def resolve_projects_dir() -> Path:
     projects_dir = os.getenv("DISPATCHER_PROJECTS_DIR")
     if projects_dir:
         return Path(projects_dir).expanduser().resolve()
-    return default_projects_dir(dispatcher_dir, base_branch).resolve()
+    return default_projects_dir().resolve()
 
 
 def _parse_env_line(line: str) -> tuple[str, str] | None:
@@ -194,12 +194,9 @@ def build_config(argv: Sequence[str] | None = None) -> Config:
         os.getenv("DISPATCHER_REDIS_POLL_INTERVAL", "60")
     )
     repo_name = repo_name_from_full_name(repo) if repo else dispatcher_dir.name
-    projects_dir = resolve_projects_dir(dispatcher_dir, args.base_branch)
+    projects_dir = resolve_projects_dir()
     worktree_root = (
-        args.worktree_root
-        or default_worktree_root(
-            dispatcher_dir, repo_name, args.base_branch, projects_dir
-        )
+        args.worktree_root or default_worktree_root(repo_name, projects_dir)
     ).resolve()
     project_dir = (args.project_dir or worktree_root / args.base_branch).resolve()
     state_file = (
