@@ -177,7 +177,7 @@ class ConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             dispatcher_dir = Path(temp_dir) / "dispatcher"
             dispatcher_dir.mkdir()
-            (dispatcher_dir / ".env").write_text(
+            (dispatcher_dir / ".env").write_text(  # pragma: allowlist secret
                 "\n".join(
                     [
                         "DISPATCHER_REPO=owner/dotenv-repo",
@@ -200,7 +200,9 @@ class ConfigTests(unittest.TestCase):
     def test_dotenv_does_not_override_existing_environment(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             env_file = Path(temp_dir) / ".env"
-            env_file.write_text("DISPATCHER_REPO=owner/from-dotenv\n")
+            env_file.write_text(
+                "DISPATCHER_REPO=owner/from-dotenv\n"  # pragma: allowlist secret
+            )
 
             with patch.dict(
                 "os.environ", {"DISPATCHER_REPO": "owner/from-shell"}, clear=True
