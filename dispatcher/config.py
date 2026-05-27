@@ -46,7 +46,7 @@ def positive_int(value: str) -> int:
 
 
 def load_env_file(path: Path | None = None) -> None:
-    env_path = path or Path.cwd() / ".env"
+    env_path = path or resolve_root_dir() / ".env"
     if not env_path.is_file():
         return
 

@@ -76,6 +76,32 @@ class ConfigTests(unittest.TestCase):
                 (root_dir / ".dispatcher" / "logs").resolve(),
             )
 
+    def test_loads_env_file_from_dispatcher_root_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cwd_dir = Path(temp_dir) / "cwd"
+            root_dir = Path(temp_dir) / "dispatcher-root"
+            cwd_dir.mkdir()
+            root_dir.mkdir()
+            (cwd_dir / ".env").write_text("DISPATCHER_REPO=owner/cwd-repo\n")
+            (root_dir / ".env").write_text("DISPATCHER_REPO=owner/root-repo\n")
+            with (
+                patch("pathlib.Path.cwd", return_value=cwd_dir),
+                patch.dict(
+                    "os.environ",
+                    {"DISPATCHER_ROOT_DIR": str(root_dir)},
+                    clear=True,
+                ),
+            ):
+                config = build_config([])
+
+            self.assertEqual(config.repo, "owner/root-repo")
+            repo_root = (Path("/Projects") / "root-repo").resolve()
+            self.assertEqual(config.paths.project_dir, repo_root / "main")
+            self.assertEqual(
+                config.paths.state_file,
+                (root_dir / ".dispatcher" / "state.json").resolve(),
+            )
+
     def test_projects_dir_env_overrides_default_repo_parent(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             dispatcher_dir = Path(temp_dir) / "dispatcher"

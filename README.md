@@ -120,8 +120,14 @@ DISPATCHER_REDIS_URL=redis://localhost:6379/0 uv run dispatcher-repos remove OWN
 ```
 
 Issue state is terminal once a record exists, including `failed` records. The
-poller will not automatically retry failed issues; clear or edit the relevant
-entry in `.dispatcher/state.json` before reprocessing an issue.
+poller will not automatically retry failed issues. When using the local JSON
+fallback, clear or edit the relevant entry in `.dispatcher/state.json` before
+reprocessing an issue. When using Redis-backed state, delete the matching
+`dispatcher:state:{owner/repo}:{issue_number}` key instead, for example:
+
+```bash
+redis-cli DEL 'dispatcher:state:OWNER/REPO:123'
+```
 
 Issues with both the main trigger label, `automate` by default, and the
 secondary `automate:opus` label run the planning stage with
