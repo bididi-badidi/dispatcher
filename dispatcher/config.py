@@ -16,7 +16,11 @@ from dispatcher.constants import (
     DEFAULT_POLL_INTERVAL_SECONDS,
     DEFAULT_STATE_FILE,
 )
-from dispatcher.git import default_worktree_root, repo_name_from_full_name
+from dispatcher.git import (
+    default_projects_dir,
+    default_worktree_root,
+    repo_name_from_full_name,
+)
 from dispatcher.models import Commands, Config, Paths
 from dispatcher.prompts import (
     default_build_command,
@@ -53,6 +57,20 @@ def load_env_file(path: Path | None = None) -> None:
 
         key, value = key_value
         os.environ.setdefault(key, value)
+
+
+def resolve_root_dir() -> Path:
+    root_dir = os.getenv("DISPATCHER_ROOT_DIR")
+    if root_dir:
+        return Path(root_dir).expanduser().resolve()
+    return Path.cwd().resolve()
+
+
+def resolve_projects_dir() -> Path:
+    projects_dir = os.getenv("DISPATCHER_PROJECTS_DIR")
+    if projects_dir:
+        return Path(projects_dir).expanduser().resolve()
+    return default_projects_dir().resolve()
 
 
 def _parse_env_line(line: str) -> tuple[str, str] | None:
@@ -167,7 +185,7 @@ def build_config(argv: Sequence[str] | None = None) -> Config:
     )
     args = parser.parse_args(argv)
 
-    dispatcher_dir = Path.cwd().resolve()
+    dispatcher_dir = resolve_root_dir()
     repo = os.getenv("DISPATCHER_REPO")
     redis_url = os.getenv("DISPATCHER_REDIS_URL")
     opus_label = os.getenv("DISPATCHER_OPUS_LABEL", DEFAULT_OPUS_LABEL)
@@ -176,9 +194,9 @@ def build_config(argv: Sequence[str] | None = None) -> Config:
         os.getenv("DISPATCHER_REDIS_POLL_INTERVAL", "60")
     )
     repo_name = repo_name_from_full_name(repo) if repo else dispatcher_dir.name
+    projects_dir = resolve_projects_dir()
     worktree_root = (
-        args.worktree_root
-        or default_worktree_root(dispatcher_dir, repo_name, args.base_branch)
+        args.worktree_root or default_worktree_root(repo_name, projects_dir)
     ).resolve()
     project_dir = (args.project_dir or worktree_root / args.base_branch).resolve()
     state_file = (
