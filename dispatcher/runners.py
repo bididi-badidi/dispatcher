@@ -67,7 +67,7 @@ class AgentRunner(ABC):
         output = (completed.stdout or completed.stderr).strip()
         return output or f"unknown (exit {completed.returncode})"
 
-    def run(self, issue: Issue, config: Config, worktree: Path, branch: str) -> None:
+    def run(self, issue: Issue, config: Config, worktree: Path, branch: str) -> str:
         prompt = self.prompt(issue, config, worktree, branch)
         cwd = self.cwd(config, worktree)
         command = self.command_for(issue, prompt, cwd)
@@ -88,7 +88,7 @@ class AgentRunner(ABC):
                 f"DRY RUN: {command_text}{stdin_log}\n\n[version]\n{version}\n",
                 encoding="utf-8",
             )
-            return
+            return ""
 
         print_subprocess_command(command)
         completed = subprocess.run(
@@ -109,6 +109,7 @@ class AgentRunner(ABC):
                 f"{self.stage_name} stage failed with exit code "
                 f"{completed.returncode}; see {log_path}"
             )
+        return completed.stdout
 
     def _validate_command(self, command: Sequence[str]) -> None:
         used_banned_flags = sorted(BANNED_AGENT_FLAGS.intersection(command))
@@ -256,7 +257,7 @@ def run_stage(
     config: Config,
     worktree: Path,
     branch: str,
-) -> None:
+) -> str:
     if runner.stage_name != name:
         raise ValueError(f"runner {runner.stage_name!r} cannot run {name!r}")
-    runner.run(issue, config, worktree, branch)
+    return runner.run(issue, config, worktree, branch)
