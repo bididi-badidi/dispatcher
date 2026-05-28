@@ -136,25 +136,29 @@ class GitHubTests(unittest.TestCase):
             )
 
             with patch("dispatcher.github.run_json") as run_json:
-                run_json.return_value = [
-                    {
-                        "id": 10,
-                        "state": "CHANGES_REQUESTED",
-                        "body": "Old feedback",
-                        "user": {"login": "sam"},
-                    },
-                    {
-                        "id": 11,
-                        "state": "COMMENTED",
-                        "body": "FYI",
-                        "user": {"login": "sam"},
-                    },
-                    {
-                        "id": 12,
-                        "state": "CHANGES_REQUESTED",
-                        "body": "Please add tests.",
-                        "user": {"login": "lee"},
-                    },
+                run_json.side_effect = [
+                    [
+                        {
+                            "id": 10,
+                            "state": "CHANGES_REQUESTED",
+                            "body": "Old feedback",
+                            "user": {"login": "sam"},
+                        },
+                        {
+                            "id": 11,
+                            "state": "COMMENTED",
+                            "body": "FYI",
+                            "user": {"login": "sam"},
+                        },
+                        {
+                            "id": 12,
+                            "state": "CHANGES_REQUESTED",
+                            "body": "Please add tests.",
+                            "user": {"login": "lee"},
+                        },
+                    ],
+                    [],
+                    [],
                 ]
 
                 pending = list_prs_needing_review_response(config, "owner/repo", store)
@@ -166,9 +170,69 @@ class GitHubTests(unittest.TestCase):
             self.assertNotIn("Old feedback", feedback)
             self.assertEqual(cursor, 12)
             self.assertEqual(
-                run_json.call_args.args[0],
-                ["gh", "api", "repos/owner/repo/pulls/42/reviews"],
+                [call.args[0] for call in run_json.call_args_list],
+                [
+                    ["gh", "api", "repos/owner/repo/pulls/42/reviews"],
+                    ["gh", "api", "repos/owner/repo/issues/42/comments"],
+                    ["gh", "api", "repos/owner/repo/pulls/42/comments"],
+                ],
             )
+
+    def test_list_prs_needing_review_response_includes_pr_comments(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config = make_config(root)
+            store = StateStore(config.paths.state_file)
+            store.upsert(
+                "owner/repo",
+                IssueState(
+                    number=9,
+                    title="Address PR comments",
+                    url="https://example.test/9",
+                    status="pr_opened",
+                    branch="feat/issue-9",
+                    worktree="/tmp/nine",
+                    updated_at=utc_now(),
+                    pr_url="https://github.com/owner/repo/pull/44",
+                    pr_review_cursor=20,
+                ),
+            )
+
+            with patch("dispatcher.github.run_json") as run_json:
+                run_json.side_effect = [
+                    [],
+                    [
+                        {
+                            "id": 21,
+                            "body": "Please rename this for clarity.",
+                            "user": {"login": "lee"},
+                        }
+                    ],
+                    [
+                        {
+                            "id": 22,
+                            "body": "This branch needs a regression test.",
+                            "user": {"login": "sam"},
+                            "path": "dispatcher/github.py",
+                            "line": 72,
+                        }
+                    ],
+                ]
+
+                pending = list_prs_needing_review_response(config, "owner/repo", store)
+
+            self.assertEqual(len(pending), 1)
+            issue, feedback, cursor = pending[0]
+            self.assertEqual(
+                issue, Issue(9, "Address PR comments", "https://example.test/9")
+            )
+            self.assertIn("PR comment #21 by lee", feedback)
+            self.assertIn("Please rename this for clarity.", feedback)
+            self.assertIn(
+                "Inline comment #22 by sam on dispatcher/github.py:72", feedback
+            )
+            self.assertIn("This branch needs a regression test.", feedback)
+            self.assertEqual(cursor, 22)
 
     def test_list_merged_issues_checks_pr_state(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

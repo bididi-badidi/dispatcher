@@ -70,19 +70,41 @@ def list_prs_needing_review_response(
             ["gh", "api", f"repos/{repo}/pulls/{pr_number}/reviews"],
             cwd=config.paths.project_dir,
         )
+        issue_comments = run_json(
+            ["gh", "api", f"repos/{repo}/issues/{pr_number}/comments"],
+            cwd=config.paths.project_dir,
+        )
+        review_comments = run_json(
+            ["gh", "api", f"repos/{repo}/pulls/{pr_number}/comments"],
+            cwd=config.paths.project_dir,
+        )
         cursor = int(state.get("pr_review_cursor") or 0)
         new_reviews = [
             review
             for review in reviews
             if int(review.get("id") or 0) > cursor
-            and review.get("state") == "CHANGES_REQUESTED"
+            and review.get("state") in {"CHANGES_REQUESTED", "COMMENTED"}
         ]
-        if not new_reviews:
+        new_issue_comments = [
+            comment
+            for comment in issue_comments
+            if int(comment.get("id") or 0) > cursor
+        ]
+        new_review_comments = [
+            comment
+            for comment in review_comments
+            if int(comment.get("id") or 0) > cursor
+        ]
+        if not new_reviews and not new_issue_comments and not new_review_comments:
             continue
 
         issue = _issue_from_state(state)
-        feedback = _format_review_feedback(new_reviews)
-        new_cursor = max(int(review["id"]) for review in new_reviews)
+        feedback = _format_review_feedback(
+            new_reviews, new_issue_comments, new_review_comments
+        )
+        new_cursor = max(
+            _feedback_ids(new_reviews + new_issue_comments + new_review_comments)
+        )
         pending.append((issue, feedback, new_cursor))
     return pending
 
@@ -133,7 +155,11 @@ def _issue_from_state(state: dict[str, Any]) -> Issue:
     )
 
 
-def _format_review_feedback(reviews: list[dict[str, Any]]) -> str:
+def _format_review_feedback(
+    reviews: list[dict[str, Any]],
+    issue_comments: list[dict[str, Any]],
+    review_comments: list[dict[str, Any]],
+) -> str:
     feedback: list[str] = []
     for review in reviews:
         user = review.get("user") or {}
@@ -141,4 +167,33 @@ def _format_review_feedback(reviews: list[dict[str, Any]]) -> str:
         author = str(login or "unknown reviewer")
         body = str(review.get("body") or "No details provided.")
         feedback.append(f"Review #{review['id']} by {author}:\n{body}")
+    for comment in issue_comments:
+        user = comment.get("user") or {}
+        login = user.get("login") if isinstance(user, dict) else None
+        author = str(login or "unknown commenter")
+        body = str(comment.get("body") or "No details provided.")
+        feedback.append(f"PR comment #{comment['id']} by {author}:\n{body}")
+    for comment in review_comments:
+        user = comment.get("user") or {}
+        login = user.get("login") if isinstance(user, dict) else None
+        author = str(login or "unknown commenter")
+        body = str(comment.get("body") or "No details provided.")
+        location = _format_review_comment_location(comment)
+        feedback.append(
+            f"Inline comment #{comment['id']} by {author}{location}:\n{body}"
+        )
     return "\n\n".join(feedback)
+
+
+def _feedback_ids(feedback_items: list[dict[str, Any]]) -> list[int]:
+    return [int(item["id"]) for item in feedback_items]
+
+
+def _format_review_comment_location(comment: dict[str, Any]) -> str:
+    path = comment.get("path")
+    line = comment.get("line") or comment.get("original_line")
+    if path and line:
+        return f" on {path}:{line}"
+    if path:
+        return f" on {path}"
+    return ""
