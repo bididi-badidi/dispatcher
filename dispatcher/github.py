@@ -71,9 +71,7 @@ def list_prs_needing_review_response(
 ) -> list[tuple[Issue, str, tuple[int, int, int]]]:
     pending: list[tuple[Issue, str, tuple[int, int, int]]] = []
     for state in store.list_issue_states(repo):
-        if state.get("status") not in {"pr_opened", "failed"} or not state.get(
-            "pr_url"
-        ):
+        if state.get("status") != "pr_opened" or not state.get("pr_url"):
             continue
 
         if state.get("pr_review_cursor") is None:
