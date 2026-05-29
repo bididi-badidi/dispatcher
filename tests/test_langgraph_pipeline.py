@@ -50,15 +50,23 @@ class LangGraphPipelineTests(unittest.TestCase):
                     "dispatcher.langgraph_pipeline.async_run_stage",
                     side_effect=run_stage,
                 ):
-                    state = await async_run_langgraph_pipeline(
-                        Task(config.repo, issue), config, store, 1, asyncio.Event()
-                    )
+                    with patch(
+                        "dispatcher.langgraph_pipeline.initial_review_cursor",
+                        return_value=(88, 0, 0),
+                    ) as cursor:
+                        state = await async_run_langgraph_pipeline(
+                            Task(config.repo, issue), config, store, 1, asyncio.Event()
+                        )
 
                 self.assertEqual(state.status, "pr_opened")
                 self.assertEqual(state.build_iteration, 1)
                 self.assertEqual(
                     state.pr_url, "https://github.com/example/repo/pull/12"
                 )
+                self.assertEqual(state.pr_review_cursor, 88)
+                self.assertEqual(state.pr_issue_comment_cursor, 0)
+                self.assertEqual(state.pr_review_comment_cursor, 0)
+                cursor.assert_called_once_with(config, "example/repo", "12")
                 self.assertLess(
                     abs(
                         review_started["review_plan"] - review_started["review_quality"]
@@ -69,6 +77,9 @@ class LangGraphPipelineTests(unittest.TestCase):
                 self.assertEqual(saved["status"], "pr_opened")
                 self.assertEqual(saved["plan_review"], "approved")
                 self.assertEqual(saved["quality_review"], "approved")
+                self.assertEqual(saved["pr_review_cursor"], 88)
+                self.assertEqual(saved["pr_issue_comment_cursor"], 0)
+                self.assertEqual(saved["pr_review_comment_cursor"], 0)
 
         asyncio.run(scenario())
 
@@ -146,12 +157,19 @@ class LangGraphPipelineTests(unittest.TestCase):
                     "dispatcher.langgraph_pipeline.async_run_stage",
                     side_effect=run_stage,
                 ):
-                    state = await async_run_langgraph_pipeline(
-                        Task(config.repo, issue), config, store, 2, asyncio.Event()
-                    )
+                    with patch(
+                        "dispatcher.langgraph_pipeline.initial_review_cursor",
+                        return_value=(89, 0, 0),
+                    ):
+                        state = await async_run_langgraph_pipeline(
+                            Task(config.repo, issue), config, store, 2, asyncio.Event()
+                        )
 
                 self.assertEqual(state.status, "pr_opened")
                 self.assertEqual(state.build_iteration, 2)
+                self.assertEqual(state.pr_review_cursor, 89)
+                self.assertEqual(state.pr_issue_comment_cursor, 0)
+                self.assertEqual(state.pr_review_comment_cursor, 0)
                 self.assertEqual(calls.count("build"), 2)
                 self.assertEqual(calls.count("open_pr"), 1)
 

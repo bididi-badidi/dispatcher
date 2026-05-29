@@ -9,7 +9,7 @@ from pathlib import Path
 
 from dispatcher.cleanup import cleanup_merged_branch
 from dispatcher.github import (
-    list_merged_issues,
+    list_terminal_prs,
     list_prs_needing_review_response,
     list_triggered_issues,
 )
@@ -116,7 +116,7 @@ class Dispatcher:
         pending = await asyncio.to_thread(
             list_prs_needing_review_response, repo_config, repo, self.store
         )
-        for issue, feedback, new_cursor in pending:
+        for issue, feedback, new_cursors in pending:
             if (repo, issue.number) in self._in_flight:
                 continue
 
@@ -125,8 +125,11 @@ class Dispatcher:
                 continue
 
             state = IssueState(**existing)
-            state.pr_review_cursor = new_cursor
+            state.pr_review_cursor = new_cursors[0]
+            state.pr_issue_comment_cursor = new_cursors[1]
+            state.pr_review_comment_cursor = new_cursors[2]
             state.status = "pr_review_queued"
+            state.build_iteration = 0
             state.build_feedback = feedback
             state.updated_at = utc_now()
             self.store.upsert(repo, state)
@@ -134,10 +137,11 @@ class Dispatcher:
 
     async def _cleanup_merged_issues(self, repo: str) -> None:
         repo_config = config_for_repo(self.config, repo)
-        merged = await asyncio.to_thread(
-            list_merged_issues, repo_config, repo, self.store
+        terminal_prs = await asyncio.to_thread(
+            list_terminal_prs, repo_config, repo, self.store
         )
-        for issue in merged:
+        for terminal_pr in terminal_prs:
+            issue = terminal_pr.issue
             if (repo, issue.number) in self._in_flight:
                 continue
 
@@ -146,7 +150,7 @@ class Dispatcher:
                 continue
 
             state = IssueState(**existing)
-            state.status = "merged"
+            state.status = terminal_pr.status
             state.updated_at = utc_now()
             self.store.upsert(repo, state)
 
