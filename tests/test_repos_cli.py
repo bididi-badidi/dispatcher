@@ -39,13 +39,15 @@ class ReposCliTests(unittest.TestCase):
         with (
             _configured_env(),
             patch.object(repos_cli, "RedisStateStore", return_value=store),
-            self.assertLogs("dispatcher.repos_cli", level="INFO") as logs,
+            patch("sys.stdout") as stdout,
         ):
             exit_code = repos_cli.main(["list"])
 
         self.assertEqual(exit_code, 0)
-        self.assertIn("owner/a", logs.output[0])
-        self.assertIn("owner/z", logs.output[1])
+        self.assertEqual(
+            [call.args[0] for call in stdout.write.call_args_list],
+            ["owner/a", "\n", "owner/z", "\n"],
+        )
         store.close.assert_called_once_with()
 
     def test_remove_exits_zero_when_repo_is_absent(self) -> None:

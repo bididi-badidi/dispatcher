@@ -255,7 +255,7 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(calls[0][1:4], ("example/repo", 8, "worktree"))
         self.assertEqual(calls[0][4].name, "issue-8-worktree.log")
 
-    def test_no_upload_when_bucket_unset(self) -> None:
+    def test_stage_log_fallback_when_bucket_unset(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             worktree = Path(temp_dir)
             config = make_config(worktree)
@@ -272,5 +272,11 @@ class RunnerTests(unittest.TestCase):
                     worktree,
                     "feat/issue-8",
                 )
+
+            fallback = (
+                config.session_log_local_dir / "example/repo" / "issue_8-worktree.log"
+            )
+            self.assertTrue(fallback.is_file())
+            self.assertIn("DRY RUN", fallback.read_text(encoding="utf-8"))
 
         background.assert_not_called()

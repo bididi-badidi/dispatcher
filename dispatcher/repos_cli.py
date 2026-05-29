@@ -78,7 +78,7 @@ def _dispatch(args: argparse.Namespace, store: RepoStore) -> int:
 
     if args.command == "list":
         for repo in store.get_repos():
-            LOGGER.info("%s", repo)
+            print(repo)
         return 0
 
     if args.command == "remove":
