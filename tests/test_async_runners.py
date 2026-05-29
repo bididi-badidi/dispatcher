@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -110,5 +111,46 @@ class AsyncRunnerTests(unittest.TestCase):
                 )
                 log_text = log_path.read_text(encoding="utf-8")
                 self.assertIn("--model claude-opus-4-7", log_text)
+
+        asyncio.run(scenario())
+
+    def test_async_stage_log_uploads_when_bucket_configured(self) -> None:
+        async def scenario() -> None:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                worktree = Path(temp_dir)
+                config = replace(
+                    make_config(worktree),
+                    s3_log_bucket="dispatcher-logs",
+                )
+                runner = ClaudeRunner("plan $issue_number")
+                calls = []
+
+                class FakeBackground:
+                    def submit_stage_upload(self, uploader, repo, issue, stage, path):
+                        calls.append((repo, issue, stage, path))
+
+                with (
+                    patch(
+                        "dispatcher.async_runners.uploader_from_config",
+                        return_value=object(),
+                    ),
+                    patch(
+                        "dispatcher.background.get_default_background",
+                        return_value=FakeBackground(),
+                    ),
+                    patch.object(ClaudeRunner, "version", return_value="claude 1.0"),
+                ):
+                    await async_run_stage(
+                        "plan",
+                        runner,
+                        Issue(9, "Upload", "https://example.test/9"),
+                        config,
+                        worktree,
+                        "feat/issue-9",
+                    )
+
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(calls[0][:3], ("example/repo", 9, "plan"))
+            self.assertEqual(calls[0][3].name, "issue-9-plan.log")
 
         asyncio.run(scenario())

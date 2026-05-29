@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -140,3 +141,86 @@ class PipelineTests(unittest.TestCase):
             self.assertTrue((repo_log_dir / "issue-7-worktree.log").exists())
             self.assertTrue((repo_log_dir / "issue-7-plan.log").exists())
             self.assertTrue((repo_log_dir / "issue-7-build.log").exists())
+
+    def test_pipeline_uploads_issue_log_on_success(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config = replace(make_config(root), s3_log_bucket="dispatcher-logs")
+            store = StateStore(config.paths.state_file)
+            calls = []
+
+            def fake_run_stage(name, runner, issue, config, worktree, branch):
+                repo_log_dir = config.paths.log_dir / config.repo
+                repo_log_dir.mkdir(parents=True, exist_ok=True)
+                (repo_log_dir / f"issue-{issue.number}-{name}.log").write_text(
+                    name, encoding="utf-8"
+                )
+
+            class FakeBackground:
+                def submit_issue_upload(self, uploader, repo, issue, paths):
+                    calls.append((repo, issue, [path.name for path in paths]))
+
+            with (
+                patch("dispatcher.pipeline.run_stage", side_effect=fake_run_stage),
+                patch(
+                    "dispatcher.pipeline.uploader_from_config", return_value=object()
+                ),
+                patch(
+                    "dispatcher.background.get_default_background",
+                    return_value=FakeBackground(),
+                ),
+            ):
+                run_pipeline(
+                    Issue(10, "Upload", "https://example.test/10"), config, store
+                )
+
+        self.assertEqual(
+            calls,
+            [
+                (
+                    "example/repo",
+                    10,
+                    [
+                        "issue-10-worktree.log",
+                        "issue-10-plan.log",
+                        "issue-10-build.log",
+                    ],
+                )
+            ],
+        )
+
+    def test_pipeline_uploads_issue_log_on_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config = replace(make_config(root), s3_log_bucket="dispatcher-logs")
+            store = StateStore(config.paths.state_file)
+            calls = []
+
+            def fake_run_stage(name, runner, issue, config, worktree, branch):
+                repo_log_dir = config.paths.log_dir / config.repo
+                repo_log_dir.mkdir(parents=True, exist_ok=True)
+                (repo_log_dir / f"issue-{issue.number}-{name}.log").write_text(
+                    name, encoding="utf-8"
+                )
+                raise RuntimeError("stage failed")
+
+            class FakeBackground:
+                def submit_issue_upload(self, uploader, repo, issue, paths):
+                    calls.append((repo, issue, [path.name for path in paths]))
+
+            with (
+                patch("dispatcher.pipeline.run_stage", side_effect=fake_run_stage),
+                patch(
+                    "dispatcher.pipeline.uploader_from_config", return_value=object()
+                ),
+                patch(
+                    "dispatcher.background.get_default_background",
+                    return_value=FakeBackground(),
+                ),
+                self.assertRaisesRegex(RuntimeError, "stage failed"),
+            ):
+                run_pipeline(
+                    Issue(11, "Upload", "https://example.test/11"), config, store
+                )
+
+        self.assertEqual(calls, [("example/repo", 11, ["issue-11-worktree.log"])])

@@ -376,6 +376,39 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.repo, "owner/repo")
         self.assertIsNone(config.redis_url)
 
+    def test_aws_s3_log_bucket_env_populates_config(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dispatcher_dir = Path(temp_dir) / "dispatcher"
+            dispatcher_dir.mkdir()
+            with (
+                patch("pathlib.Path.cwd", return_value=dispatcher_dir),
+                patch.dict(
+                    "os.environ",
+                    {
+                        "DISPATCHER_REPO": "owner/repo",
+                        "AWS_S3_LOG_BUCKET": "dispatcher-logs",
+                        "AWS_S3_LOG_KEY_PREFIX": "prod",
+                    },
+                    clear=True,
+                ),
+            ):
+                config = build_config([])
+
+        self.assertEqual(config.s3_log_bucket, "dispatcher-logs")
+        self.assertEqual(config.s3_log_key_prefix, "prod")
+
+    def test_aws_s3_log_bucket_unset_leaves_none(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dispatcher_dir = Path(temp_dir) / "dispatcher"
+            dispatcher_dir.mkdir()
+            with (
+                patch("pathlib.Path.cwd", return_value=dispatcher_dir),
+                patch.dict("os.environ", {"DISPATCHER_REPO": "owner/repo"}, clear=True),
+            ):
+                config = build_config([])
+
+        self.assertIsNone(config.s3_log_bucket)
+
     def test_loads_dotenv_before_reading_environment_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             dispatcher_dir = Path(temp_dir) / "dispatcher"
