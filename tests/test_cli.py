@@ -37,11 +37,13 @@ class CliTests(unittest.TestCase):
 
             with (
                 patch("dispatcher.queue.Dispatcher.run", side_effect=KeyboardInterrupt),
+                patch("builtins.print") as print_mock,
                 self.assertLogs("dispatcher", level="INFO") as logs,
             ):
                 result = _run_daemon(config, store)
 
             self.assertEqual(result, 130)
+            print_mock.assert_not_called()
             self.assertIn("Stopping dispatcher daemon.", logs.output[0])
 
     def test_polling_loop_repeats_after_interval(self) -> None:
@@ -115,3 +117,21 @@ class CliTests(unittest.TestCase):
 
         self.assertFalse(result)
         list_issues.assert_not_called()
+
+
+def test_daemon_keyboard_interrupt_keeps_stdout_silent(capsys) -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        config = make_config(root)
+        store = StateStore(config.paths.state_file)
+
+        with (
+            patch("dispatcher.queue.Dispatcher.run", side_effect=KeyboardInterrupt),
+            patch("dispatcher.cli.LOGGER.info") as log_info,
+        ):
+            result = _run_daemon(config, store)
+
+    out, _ = capsys.readouterr()
+    assert result == 130
+    assert out == ""
+    log_info.assert_called_once_with("Stopping dispatcher daemon.")
