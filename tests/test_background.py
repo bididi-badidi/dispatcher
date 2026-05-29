@@ -39,7 +39,7 @@ class BackgroundUploaderTests(unittest.TestCase):
         self.assertEqual(uploader.calls[0][1], "plan")
         self.assertNotEqual(uploader.calls[0][0], test_thread_id)
 
-    def test_failed_upload_is_logged_not_raised(self) -> None:
+    def test_failed_upload_is_logged_and_future_raises(self) -> None:
         class FailingUploader(FakeUploader):
             def upload_stage_log(
                 self, repo: str, issue_number: int, stage: str, path: Path
