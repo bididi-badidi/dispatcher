@@ -6,7 +6,12 @@ No active tasks
 
 ## Upcoming
 
-No upcoming tasks
+### Future Features
+
+- [ ] **Dashboard** — real-time UI to track per-worker progress and the live work queue (issue assignments, stage, status, ETA).
+- [ ] **Dynamic branch naming** — agent determines the branch name at planning time; all subsequent git operations (worktree, PR, cleanup) use the agent-chosen name rather than a hardcoded convention.
+- [ ] **Robust S3 logging** — structured, per-run log files shipped to an S3 bucket; local logs remain lightweight; log level and bucket configured via env/config.
+- [ ] **Prompt versioning** — prompts are versioned artifacts (e.g. `prompts/v1/plan.md`); the running version is recorded in state and logs so behaviour is reproducible and rollbacks are possible.
 
 ## Project Documents
 
