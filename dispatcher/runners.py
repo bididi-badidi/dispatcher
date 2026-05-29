@@ -19,6 +19,7 @@ from dispatcher.constants import (
 from dispatcher.git import codex_git_write_dirs
 from dispatcher.models import Config, Issue
 from dispatcher.prompts import render_template
+from dispatcher.s3_logs import uploader_from_config
 from dispatcher.subprocess_utils import print_subprocess_command
 
 
@@ -88,6 +89,7 @@ class AgentRunner(ABC):
                 f"DRY RUN: {command_text}{stdin_log}\n\n[version]\n{version}\n",
                 encoding="utf-8",
             )
+            _submit_stage_upload(config, issue.number, self.stage_name, log_path)
             return ""
 
         print_subprocess_command(command)
@@ -104,6 +106,7 @@ class AgentRunner(ABC):
             f"{completed.stdout}\n\n[stderr]\n{completed.stderr}",
             encoding="utf-8",
         )
+        _submit_stage_upload(config, issue.number, self.stage_name, log_path)
         if completed.returncode != 0:
             raise RuntimeError(
                 f"{self.stage_name} stage failed with exit code "
@@ -261,3 +264,20 @@ def run_stage(
     if runner.stage_name != name:
         raise ValueError(f"runner {runner.stage_name!r} cannot run {name!r}")
     return runner.run(issue, config, worktree, branch)
+
+
+def _submit_stage_upload(
+    config: Config, issue_number: int, stage_name: str, log_path: Path
+) -> None:
+    repo = config.repo
+    if repo is None:
+        raise RuntimeError("runner requires a concrete repository")
+    uploader = uploader_from_config(config)
+    if uploader is None:
+        return
+
+    from dispatcher.background import get_default_background
+
+    get_default_background().submit_stage_upload(
+        uploader, repo, issue_number, stage_name, log_path
+    )

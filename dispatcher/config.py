@@ -190,6 +190,8 @@ def build_config(argv: Sequence[str] | None = None) -> Config:
     redis_url = os.getenv("DISPATCHER_REDIS_URL")
     opus_label = os.getenv("DISPATCHER_OPUS_LABEL", DEFAULT_OPUS_LABEL)
     opus_model = os.getenv("DISPATCHER_OPUS_MODEL", DEFAULT_PLAN_OPUS_MODEL)
+    s3_log_bucket = os.getenv("AWS_S3_LOG_BUCKET", "").strip() or None
+    s3_log_key_prefix = os.getenv("AWS_S3_LOG_KEY_PREFIX", "").strip()
     redis_poll_interval = positive_int(
         os.getenv("DISPATCHER_REDIS_POLL_INTERVAL", "60")
     )
@@ -233,6 +235,8 @@ def build_config(argv: Sequence[str] | None = None) -> Config:
         once=args.once,
         daemon=args.daemon,
         max_workers=args.max_workers,
+        s3_log_bucket=s3_log_bucket,
+        s3_log_key_prefix=s3_log_key_prefix,
     )
     validate_config(config)
     return config

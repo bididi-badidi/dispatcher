@@ -7,6 +7,7 @@ from collections.abc import Callable
 from typing import Sequence
 
 from dispatcher.config import build_config
+from dispatcher.background import shutdown_default_background
 from dispatcher.github import list_triggered_issues
 from dispatcher.models import Config
 from dispatcher.pipeline import first_unstarted_issue, run_pipeline
@@ -53,10 +54,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_daemon(config, store)
 
     try:
-        run_polling_loop(config, store)
-    except KeyboardInterrupt:
-        print("Stopping dispatcher polling.")
-        return 130
+        if config.once:
+            run_once(config, store)
+            return 0
+
+        if config.daemon:
+            return _run_daemon(config, store)
+
+        try:
+            run_polling_loop(config, store)
+        except KeyboardInterrupt:
+            print("Stopping dispatcher polling.")
+            return 130
+    finally:
+        shutdown_default_background(wait=True)
 
     return 0
 
