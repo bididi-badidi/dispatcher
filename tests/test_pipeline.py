@@ -142,85 +142,89 @@ class PipelineTests(unittest.TestCase):
             self.assertTrue((repo_log_dir / "issue-7-plan.log").exists())
             self.assertTrue((repo_log_dir / "issue-7-build.log").exists())
 
-    def test_pipeline_uploads_issue_log_on_success(self) -> None:
+    def test_records_pr_url_from_build_stage_output(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            config = replace(make_config(root), s3_log_bucket="dispatcher-logs")
+            repo_root = Path(temp_dir) / "repo"
+            main_checkout = repo_root / "main"
+            main_checkout.mkdir(parents=True)
+            config = make_config(main_checkout, dry_run=False)
+            config = Config(
+                repo=config.repo,
+                label=config.label,
+                opus_label=config.opus_label,
+                opus_model=config.opus_model,
+                base_branch=config.base_branch,
+                branch_prefix=config.branch_prefix,
+                paths=Paths(
+                    project_dir=main_checkout,
+                    worktree_root=repo_root,
+                    state_file=config.paths.state_file,
+                    log_dir=config.paths.log_dir,
+                ),
+                commands=config.commands,
+                dry_run=config.dry_run,
+            )
             store = StateStore(config.paths.state_file)
-            calls = []
+            issue = Issue(12, "Open a PR", "https://example.test/12")
+            worktree = repo_root / "feat" / "issue-12"
+            worktree.mkdir(parents=True)
 
-            def fake_run_stage(name, runner, issue, config, worktree, branch):
-                repo_log_dir = config.paths.log_dir / config.repo
-                repo_log_dir.mkdir(parents=True, exist_ok=True)
-                (repo_log_dir / f"issue-{issue.number}-{name}.log").write_text(
-                    name, encoding="utf-8"
-                )
+            with patch("dispatcher.pipeline.run_stage") as run_stage:
+                with patch(
+                    "dispatcher.pipeline.initial_review_cursor", return_value=(77, 0, 0)
+                ) as cursor:
+                    run_stage.side_effect = [
+                        "",
+                        "",
+                        "Done: https://github.com/example/repo/pull/12",
+                    ]
 
-            class FakeBackground:
-                def submit_issue_upload(self, uploader, repo, issue, paths):
-                    calls.append((repo, issue, [path.name for path in paths]))
+                    state = run_pipeline(issue, config, store)
 
-            with (
-                patch("dispatcher.pipeline.run_stage", side_effect=fake_run_stage),
-                patch(
-                    "dispatcher.pipeline.uploader_from_config", return_value=object()
-                ),
-                patch(
-                    "dispatcher.background.get_default_background",
-                    return_value=FakeBackground(),
-                ),
-            ):
-                run_pipeline(
-                    Issue(10, "Upload", "https://example.test/10"), config, store
-                )
+            cursor.assert_called_once_with(config, "example/repo", "12")
+            self.assertEqual(state.status, "pr_opened")
+            self.assertEqual(state.pr_url, "https://github.com/example/repo/pull/12")
+            self.assertEqual(state.pr_review_cursor, 77)
+            saved_issue = store.get("example/repo", 12)
+            self.assertEqual(saved_issue["status"], "pr_opened")
+            self.assertEqual(
+                saved_issue["pr_url"], "https://github.com/example/repo/pull/12"
+            )
+            self.assertEqual(saved_issue["pr_review_cursor"], 77)
 
-        self.assertEqual(
-            calls,
-            [
-                (
-                    "example/repo",
-                    10,
-                    [
-                        "issue-10-worktree.log",
-                        "issue-10-plan.log",
-                        "issue-10-build.log",
-                    ],
-                )
-            ],
-        )
-
-    def test_pipeline_uploads_issue_log_on_failure(self) -> None:
+    def test_build_stage_must_emit_pr_url(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            config = replace(make_config(root), s3_log_bucket="dispatcher-logs")
+            repo_root = Path(temp_dir) / "repo"
+            main_checkout = repo_root / "main"
+            main_checkout.mkdir(parents=True)
+            config = make_config(main_checkout, dry_run=False)
+            config = Config(
+                repo=config.repo,
+                label=config.label,
+                opus_label=config.opus_label,
+                opus_model=config.opus_model,
+                base_branch=config.base_branch,
+                branch_prefix=config.branch_prefix,
+                paths=Paths(
+                    project_dir=main_checkout,
+                    worktree_root=repo_root,
+                    state_file=config.paths.state_file,
+                    log_dir=config.paths.log_dir,
+                ),
+                commands=config.commands,
+                dry_run=config.dry_run,
+            )
             store = StateStore(config.paths.state_file)
-            calls = []
+            issue = Issue(13, "Missing PR URL", "https://example.test/13")
+            worktree = repo_root / "feat" / "issue-13"
+            worktree.mkdir(parents=True)
 
-            def fake_run_stage(name, runner, issue, config, worktree, branch):
-                repo_log_dir = config.paths.log_dir / config.repo
-                repo_log_dir.mkdir(parents=True, exist_ok=True)
-                (repo_log_dir / f"issue-{issue.number}-{name}.log").write_text(
-                    name, encoding="utf-8"
-                )
-                raise RuntimeError("stage failed")
+            with patch("dispatcher.pipeline.run_stage") as run_stage:
+                run_stage.side_effect = ["", "", "build finished"]
 
-            class FakeBackground:
-                def submit_issue_upload(self, uploader, repo, issue, paths):
-                    calls.append((repo, issue, [path.name for path in paths]))
+                with self.assertRaisesRegex(RuntimeError, "did not print"):
+                    run_pipeline(issue, config, store)
 
-            with (
-                patch("dispatcher.pipeline.run_stage", side_effect=fake_run_stage),
-                patch(
-                    "dispatcher.pipeline.uploader_from_config", return_value=object()
-                ),
-                patch(
-                    "dispatcher.background.get_default_background",
-                    return_value=FakeBackground(),
-                ),
-                self.assertRaisesRegex(RuntimeError, "stage failed"),
-            ):
-                run_pipeline(
-                    Issue(11, "Upload", "https://example.test/11"), config, store
-                )
-
-        self.assertEqual(calls, [("example/repo", 11, ["issue-11-worktree.log"])])
+            saved_issue = store.get("example/repo", 13)
+            self.assertEqual(saved_issue["status"], "failed")
+            self.assertIn("did not print", saved_issue["error"])

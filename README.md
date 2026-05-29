@@ -45,108 +45,33 @@ project.
 
 ## Usage
 
+Simple polling loop — processes newly labelled issues one at a time:
+
 ```bash
 DISPATCHER_REPO=OWNER/REPO uv run python main.py
 ```
 
-On startup, the dispatcher loads environment defaults from a `.env` file in the
-current dispatcher directory. Variables that are already exported in the shell
-take precedence over `.env` values. Start from `.env.example` when creating a
-local `.env` file.
-
-Useful options:
-
-- `--label automate` chooses the trigger label.
-- `DISPATCHER_OPUS_LABEL=automate:opus` chooses the secondary label that
-  escalates only the planning stage to Opus.
-- `DISPATCHER_OPUS_MODEL=claude-opus-4-7` chooses the Claude model used when
-  the Opus escalation label is present.
-- `DISPATCHER_REDIS_URL=redis://...` enables Redis-backed repository tracking
-  and shared issue state. Repositories are read from the `dispatcher:repos`
-  Redis set.
-- `DISPATCHER_REPO=OWNER/REPO` keeps the single-repository local JSON fallback
-  when Redis is not configured.
-- `--base-branch main` chooses the branch used for the worktree.
-- The base checkout defaults to `/Projects/{repo_name}/main` regardless of
-  where the dispatcher is run.
-- New worktrees default to `/Projects/{repo_name}/{branch_name}`.
-- `DISPATCHER_PROJECTS_DIR` changes the repo/worktree root parent; it is
-  independent of `DISPATCHER_ROOT_DIR`.
-- Dispatcher state and logs stay under the dispatcher directory by default.
-- `--poll-interval 120` chooses the delay between polling cycles, in seconds.
-  It can also be set with `DISPATCHER_POLL_INTERVAL_SECONDS`.
-- `--once` runs a single polling cycle and exits.
-- `--daemon` runs the async worker queue instead of the simple long-polling
-  loop.
-- `--max-workers 3` sets the daemon worker count.
-- `--dry-run` writes the stage commands to `.dispatcher/logs/` without running
-  Gemini, Claude, or Codex.
-- The worktree stage must create the path selected by the dispatcher before
-  planning can start.
-
-### S3 log uploads (optional)
-
-Set `AWS_S3_LOG_BUCKET` to upload dispatcher logs after each stage and after
-each issue run. When unset, the dispatcher keeps local-only log behavior and
-does not create an AWS client. The canonical object key is
-`<owner>/<repo>/issue_<number>.log`; individual stage logs use
-`<owner>/<repo>/issue_<number>-<stage>.log`.
-
-`boto3` reads standard AWS credential and region variables such as
-`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_DEFAULT_REGION`.
-`AWS_S3_LOG_KEY_PREFIX` can prepend a bucket prefix such as
-`dispatcher-prod/`. Uploads run in the background; upload failures are logged
-as warnings and do not fail the issue pipeline.
-
-The generated state file defaults to `.dispatcher/state.json`; issue records
-are grouped by repository so `OWNER/REPO#7` does not collide with another
-repository's issue `#7`. Logs default to `.dispatcher/logs/` and use matching
-repository subdirectories.
-
-By default the process keeps running and polls every 120 seconds. A failed
-polling cycle is printed to stderr, then the dispatcher waits for the next
-interval and tries again. Press Ctrl-C to stop the process.
-
-Daemon mode keeps the same polling source and stage runners, but enqueues
-unseen issues into an `asyncio` worker pool so multiple issue pipelines can run
-at the same time. Worker pipelines run through a LangGraph state graph:
-worktree creation, planning, build, parallel plan/code-quality reviews,
-conditional build retry, and PR opening.
+Daemon mode — concurrent worker pool, PR review response triggers:
 
 ```bash
-DISPATCHER_REPO=OWNER/REPO uv run python main.py --daemon --max-workers 3
+DISPATCHER_REPO=OWNER/REPO uv run python main.py --daemon
 ```
 
-Redis-backed daemon mode polls every repository currently registered in Redis:
+Redis-backed daemon — polls all registered repositories:
 
 ```bash
-DISPATCHER_REDIS_URL=redis://localhost:6379/0 uv run dispatcher-repos add OWNER/REPO
-DISPATCHER_REDIS_URL=redis://localhost:6379/0 uv run dispatcher-repos list
 DISPATCHER_REDIS_URL=redis://localhost:6379/0 uv run python main.py --daemon
 ```
 
-Use `dispatcher-repos add` before starting Redis-backed polling. The command is
-the supported way to populate the dispatcher's tracked repository set without
-calling `redis-cli SADD` directly. To stop polling a repository, run:
+On startup the dispatcher loads environment defaults from a `.env` file in the
+current dispatcher directory. Shell exports take precedence. Start from
+`.env.example` when creating a local `.env` file.
 
-```bash
-DISPATCHER_REDIS_URL=redis://localhost:6379/0 uv run dispatcher-repos remove OWNER/REPO
-```
+See [docs/cli-reference.md](docs/cli-reference.md) for all flags and
+environment variables.
 
-Issue state is terminal once a record exists, including `failed` records. The
-poller will not automatically retry failed issues. When using the local JSON
-fallback, clear or edit the relevant entry in `.dispatcher/state.json` before
-reprocessing an issue. When using Redis-backed state, delete the matching
-`dispatcher:state:{owner/repo}:{issue_number}` key instead, for example:
-
-```bash
-redis-cli DEL 'dispatcher:state:OWNER/REPO:123'
-```
-
-Issues with both the main trigger label, `automate` by default, and the
-secondary `automate:opus` label run the planning stage with
-`claude-opus-4-7`. Worktree creation and build stages keep their normal
-provider defaults.
+See [docs/scripts.md](docs/scripts.md) for common operational scripts
+(repository registration, state inspection, clearing failed records).
 
 ## Stage Prompts
 
@@ -181,6 +106,10 @@ The dispatcher rejects yolo or dangerous skip/bypass flags before launching any
 agent subprocess.
 
 ## Development
+
+Branching policy: feature branches merge into `dev`; only `dev` merges into
+`main`. This is enforced by the `branch-policy` workflow. See
+[CONTRIBUTING.md](CONTRIBUTING.md#branching-strategy).
 
 ```bash
 uv run ruff format .

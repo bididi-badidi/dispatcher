@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from dispatcher.models import Issue, IssueState
+from dispatcher.github import TerminalPr
 from dispatcher.queue import Dispatcher, Task, TaskType
 from dispatcher.state import StateStore
 from dispatcher.time_utils import utc_now
@@ -115,6 +116,172 @@ class QueueTests(unittest.TestCase):
 
                 self.assertIsNone(result)
                 self.assertNotIn((config.repo, 99), dispatcher._in_flight)
+
+        asyncio.run(scenario())
+
+    def test_enqueue_review_responses_updates_state_and_queues_review(self) -> None:
+        async def scenario() -> None:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                config = make_config(root)
+                store = StateStore(config.paths.state_file)
+                store.upsert(
+                    "example/repo",
+                    IssueState(
+                        number=10,
+                        title="Review fix",
+                        url="https://example.test/10",
+                        status="pr_opened",
+                        branch="feat/issue-10",
+                        worktree="/tmp/ten",
+                        updated_at=utc_now(),
+                        pr_url="https://github.com/example/repo/pull/10",
+                    ),
+                )
+                dispatcher = Dispatcher(config, store, max_workers=1)
+
+                with patch(
+                    "dispatcher.queue.list_prs_needing_review_response"
+                ) as list_pending:
+                    list_pending.return_value = [
+                        (
+                            Issue(10, "Review fix", "https://example.test/10"),
+                            "Please update this.",
+                            (123, 45, 67),
+                        )
+                    ]
+
+                    await dispatcher._enqueue_review_responses(config.repo)
+
+                saved = store.get(config.repo, 10)
+                self.assertEqual(saved["status"], "pr_review_queued")
+                self.assertEqual(saved["build_feedback"], "Please update this.")
+                self.assertEqual(saved["pr_review_cursor"], 123)
+                self.assertEqual(saved["pr_issue_comment_cursor"], 45)
+                self.assertEqual(saved["pr_review_comment_cursor"], 67)
+                snapshot = dispatcher.snapshot()
+                self.assertEqual(snapshot.pending[0].task_type, TaskType.REVIEW)
+
+        asyncio.run(scenario())
+
+    def test_enqueue_review_responses_resets_build_iteration(self) -> None:
+        async def scenario() -> None:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                config = make_config(root)
+                store = StateStore(config.paths.state_file)
+                store.upsert(
+                    "example/repo",
+                    IssueState(
+                        number=20,
+                        title="Retry after failure",
+                        url="https://example.test/20",
+                        status="failed",
+                        branch="feat/issue-20",
+                        worktree="/tmp/twenty",
+                        updated_at=utc_now(),
+                        pr_url="https://github.com/example/repo/pull/20",
+                        build_iteration=3,
+                    ),
+                )
+                dispatcher = Dispatcher(config, store, max_workers=1)
+
+                with patch(
+                    "dispatcher.queue.list_prs_needing_review_response"
+                ) as list_pending:
+                    list_pending.return_value = [
+                        (
+                            Issue(20, "Retry after failure", "https://example.test/20"),
+                            "Try again.",
+                            (0, 200, 0),
+                        )
+                    ]
+
+                    await dispatcher._enqueue_review_responses(config.repo)
+
+                saved = store.get(config.repo, 20)
+                self.assertEqual(saved["status"], "pr_review_queued")
+                self.assertEqual(saved["build_iteration"], 0)
+
+        asyncio.run(scenario())
+
+    def test_cleanup_merged_issues_marks_cleaned_up(self) -> None:
+        async def scenario() -> None:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                config = make_config(root)
+                store = StateStore(config.paths.state_file)
+                store.upsert(
+                    "example/repo",
+                    IssueState(
+                        number=11,
+                        title="Merged",
+                        url="https://example.test/11",
+                        status="pr_opened",
+                        branch="feat/issue-11",
+                        worktree="/tmp/eleven",
+                        updated_at=utc_now(),
+                        pr_url="https://github.com/example/repo/pull/11",
+                    ),
+                )
+                dispatcher = Dispatcher(config, store, max_workers=1)
+
+                with (
+                    patch("dispatcher.queue.list_terminal_prs") as list_terminal,
+                    patch("dispatcher.queue.cleanup_merged_branch") as cleanup,
+                ):
+                    list_terminal.return_value = [
+                        TerminalPr(
+                            Issue(11, "Merged", "https://example.test/11"),
+                            "merged",
+                        )
+                    ]
+
+                    await dispatcher._cleanup_merged_issues(config.repo)
+
+                saved = store.get(config.repo, 11)
+                self.assertEqual(saved["status"], "cleaned_up")
+                cleanup.assert_called_once()
+
+        asyncio.run(scenario())
+
+    def test_cleanup_closed_pr_marks_closed_then_cleaned_up(self) -> None:
+        async def scenario() -> None:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                config = make_config(root)
+                store = StateStore(config.paths.state_file)
+                store.upsert(
+                    "example/repo",
+                    IssueState(
+                        number=12,
+                        title="Closed",
+                        url="https://example.test/12",
+                        status="pr_opened",
+                        branch="feat/issue-12",
+                        worktree="/tmp/twelve",
+                        updated_at=utc_now(),
+                        pr_url="https://github.com/example/repo/pull/12",
+                    ),
+                )
+                dispatcher = Dispatcher(config, store, max_workers=1)
+
+                with (
+                    patch("dispatcher.queue.list_terminal_prs") as list_terminal,
+                    patch("dispatcher.queue.cleanup_merged_branch") as cleanup,
+                ):
+                    list_terminal.return_value = [
+                        TerminalPr(
+                            Issue(12, "Closed", "https://example.test/12"),
+                            "closed",
+                        )
+                    ]
+
+                    await dispatcher._cleanup_merged_issues(config.repo)
+
+                saved = store.get(config.repo, 12)
+                self.assertEqual(saved["status"], "cleaned_up")
+                cleanup.assert_called_once()
 
         asyncio.run(scenario())
 
