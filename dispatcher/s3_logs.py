@@ -101,7 +101,7 @@ def _cached_uploader(bucket: str, key_prefix: str) -> S3LogUploader:
 
 
 def _normalize_key_prefix(key_prefix: str) -> str:
-    stripped = key_prefix.strip("/")
+    stripped = key_prefix.strip().strip("/")
     return f"{stripped}/" if stripped else ""
 
 
