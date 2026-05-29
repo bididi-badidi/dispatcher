@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import re
-import sys
 from typing import Protocol, Sequence
 
 from dispatcher.config import build_config
+from dispatcher.logging_setup import configure_logging
 from dispatcher.redis_store import RedisStateStore
 
 REPO_PATTERN = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
+LOGGER = logging.getLogger("dispatcher.repos_cli")
 
 
 class RepoStore(Protocol):
@@ -22,21 +24,22 @@ class RepoStore(Protocol):
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    configure_logging()
     args = _parse_args(argv)
 
     try:
         config = build_config([])
     except SystemExit:
-        print("error: DISPATCHER_REDIS_URL is not set", file=sys.stderr)
+        LOGGER.error("error: DISPATCHER_REDIS_URL is not set")
         return 2
 
     if not config.redis_url:
-        print("error: DISPATCHER_REDIS_URL is not set", file=sys.stderr)
+        LOGGER.error("error: DISPATCHER_REDIS_URL is not set")
         return 2
 
     for repo in getattr(args, "repos", []):
         if not _is_valid_repo(repo):
-            print(f"error: invalid repo {repo!r}, expected owner/name", file=sys.stderr)
+            LOGGER.error("error: invalid repo %r, expected owner/name", repo)
             return 2
 
     store = RedisStateStore(config.redis_url)
@@ -70,18 +73,18 @@ def _dispatch(args: argparse.Namespace, store: RepoStore) -> int:
     if args.command == "add":
         for repo in args.repos:
             store.add_repo(repo)
-            print(f"tracked: {repo}")
+            LOGGER.info("tracked: %s", repo)
         return 0
 
     if args.command == "list":
         for repo in store.get_repos():
-            print(repo)
+            LOGGER.info("%s", repo)
         return 0
 
     if args.command == "remove":
         for repo in args.repos:
             store.remove_repo(repo)
-            print(f"removed (or already absent): {repo}")
+            LOGGER.info("removed (or already absent): %s", repo)
         return 0
 
     raise AssertionError(f"unhandled command: {args.command}")

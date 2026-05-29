@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import enum
+import logging
 import signal
-import sys
 from dataclasses import dataclass
 
 from dispatcher.github import list_triggered_issues
@@ -11,6 +11,8 @@ from dispatcher.langgraph_pipeline import async_run_langgraph_pipeline
 from dispatcher.models import Config, Issue
 from dispatcher.repo_context import config_for_repo
 from dispatcher.state_backend import StateBackend
+
+LOGGER = logging.getLogger("dispatcher.queue")
 
 
 class TaskType(enum.Enum):
@@ -58,10 +60,12 @@ class Dispatcher:
 
     async def run(self) -> None:
         self._install_signal_handlers()
-        print(
-            f"Polling for label {self.config.label!r} every "
-            f"{self.config.poll_interval_seconds:g} seconds with "
-            f"{self.max_workers} worker(s). Press Ctrl-C to stop."
+        LOGGER.info(
+            "Polling for label %r every %g seconds with %d worker(s). "
+            "Press Ctrl-C to stop.",
+            self.config.label,
+            self.config.poll_interval_seconds,
+            self.max_workers,
         )
         poller = asyncio.create_task(self._poller())
         workers = [
@@ -83,7 +87,7 @@ class Dispatcher:
                 for repo in self._get_repos():
                     await self._enqueue_triggered_issues(repo)
             except Exception as exc:
-                print(f"Polling cycle failed: {exc}", file=sys.stderr)
+                LOGGER.error("Polling cycle failed: %s", exc)
 
             try:
                 await asyncio.wait_for(
@@ -121,9 +125,11 @@ class Dispatcher:
                 self._completed_count += 1
             except Exception as exc:
                 self._failed_count += 1
-                print(
-                    f"Worker {worker_id} failed issue #{task.issue.number}: {exc}",
-                    file=sys.stderr,
+                LOGGER.exception(
+                    "Worker %d failed issue #%d: %s",
+                    worker_id,
+                    task.issue.number,
+                    exc,
                 )
             finally:
                 self._active[worker_id] = None
@@ -194,9 +200,9 @@ class Dispatcher:
             try:
                 return list(self.store.get_repos())  # type: ignore[attr-defined]
             except Exception as exc:
-                print(
-                    f"warn: redis unavailable, skipping repo refresh: {exc}",
-                    file=sys.stderr,
+                LOGGER.warning(
+                    "redis unavailable, skipping repo refresh: %s",
+                    exc,
                 )
                 return []
         if self.config.repo:

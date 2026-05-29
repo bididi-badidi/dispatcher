@@ -84,19 +84,22 @@ Useful options:
 - The worktree stage must create the path selected by the dispatcher before
   planning can start.
 
-### S3 log uploads (optional)
+### Session log uploads (optional)
 
-Set `AWS_S3_LOG_BUCKET` to upload dispatcher logs after each stage and after
-each issue run. When unset, the dispatcher keeps local-only log behavior and
-does not create an AWS client. The canonical object key is
-`<owner>/<repo>/issue_<number>.log`; individual stage logs use
-`<owner>/<repo>/issue_<number>-<stage>.log`.
+Set `DISPATCHER_SESSION_LOG_BUCKET` to upload dispatcher session logs after
+each stage and after each issue run. When unset, the dispatcher skips S3 and
+writes local fallback copies under `.dispatcher/logs/.session_logs/`. The
+canonical object key is `<prefix>/<owner>/<repo>/issue_<number>.log`;
+individual stage logs use
+`<prefix>/<owner>/<repo>/issue_<number>-<stage>.log`.
 
 `boto3` reads standard AWS credential and region variables such as
 `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_DEFAULT_REGION`.
-`AWS_S3_LOG_KEY_PREFIX` can prepend a bucket prefix such as
-`dispatcher-prod/`. Uploads run in the background; upload failures are logged
-as warnings and do not fail the issue pipeline.
+`DISPATCHER_SESSION_LOG_PREFIX` defaults to `logs` and can prepend a bucket
+prefix such as `dispatcher-prod/`. `AWS_S3_LOG_BUCKET` and
+`AWS_S3_LOG_KEY_PREFIX` still work as deprecated fallbacks for one release.
+Uploads run in the background; upload failures are logged as warnings and do
+not fail the issue pipeline.
 
 The generated state file defaults to `.dispatcher/state.json`; issue records
 are grouped by repository so `OWNER/REPO#7` does not collide with another

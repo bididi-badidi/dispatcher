@@ -47,6 +47,10 @@ class Config:
     s3_log_bucket: str | None = None
     s3_log_key_prefix: str = ""
 
+    @property
+    def session_log_local_dir(self) -> Path:
+        return self.paths.log_dir / ".session_logs"
+
 
 @dataclass
 class IssueState:

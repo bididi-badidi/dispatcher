@@ -9,7 +9,11 @@ from dispatcher.git import (
 )
 from dispatcher.models import Config, Issue, IssueState
 from dispatcher.runners import build_stage_runners, run_stage
-from dispatcher.s3_logs import issue_stage_log_paths, uploader_from_config
+from dispatcher.s3_logs import (
+    issue_stage_log_paths,
+    uploader_from_config,
+    write_issue_log_fallback,
+)
 from dispatcher.state_backend import StateBackend
 from dispatcher.time_utils import utc_now
 
@@ -82,10 +86,11 @@ def _require_repo(config: Config) -> str:
 def _submit_issue_upload(config: Config, issue_number: int) -> None:
     repo = _require_repo(config)
     uploader = uploader_from_config(config)
-    if uploader is None:
-        return
     stage_paths = issue_stage_log_paths(config.paths.log_dir, repo, issue_number)
     if not stage_paths:
+        return
+    if uploader is None:
+        write_issue_log_fallback(config, repo, issue_number, stage_paths)
         return
 
     from dispatcher.background import get_default_background

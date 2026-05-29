@@ -37,12 +37,12 @@ class CliTests(unittest.TestCase):
 
             with (
                 patch("dispatcher.queue.Dispatcher.run", side_effect=KeyboardInterrupt),
-                patch("builtins.print") as print_,
+                self.assertLogs("dispatcher", level="INFO") as logs,
             ):
                 result = _run_daemon(config, store)
 
             self.assertEqual(result, 130)
-            print_.assert_called_once_with("Stopping dispatcher daemon.")
+            self.assertIn("Stopping dispatcher daemon.", logs.output[0])
 
     def test_polling_loop_repeats_after_interval(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

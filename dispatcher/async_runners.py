@@ -7,7 +7,7 @@ from pathlib import Path
 
 from dispatcher.models import Config, Issue
 from dispatcher.runners import AgentRunner
-from dispatcher.s3_logs import uploader_from_config
+from dispatcher.s3_logs import uploader_from_config, write_stage_log_fallback
 from dispatcher.subprocess_utils import print_subprocess_command
 
 
@@ -55,17 +55,32 @@ async def async_run_stage(
         stderr=asyncio.subprocess.PIPE,
     )
     encoding = locale.getpreferredencoding(False)
-    stdout, stderr = await proc.communicate(
-        input=stdin_text.encode(encoding) if stdin_text is not None else None
-    )
+    stdout = b""
+    stderr = b""
+    communicate_error: BaseException | None = None
+    try:
+        stdout, stderr = await proc.communicate(
+            input=stdin_text.encode(encoding) if stdin_text is not None else None
+        )
+    except BaseException as exc:
+        communicate_error = exc
+        stdout = _captured_bytes(proc, "stdout", stdout)
+        stderr = _captured_bytes(proc, "stderr", stderr)
     stdout_text = stdout.decode(encoding, errors="replace")
     stderr_text = stderr.decode(encoding, errors="replace")
+    exception_log = (
+        f"\n\n[exception]\n{type(communicate_error).__name__}: {communicate_error}"
+        if communicate_error is not None
+        else ""
+    )
     log_path.write_text(
         f"$ {command_text}{stdin_log}\n\n[version]\n{version}\n\n[stdout]\n"
-        f"{stdout_text}\n\n[stderr]\n{stderr_text}",
+        f"{stdout_text}\n\n[stderr]\n{stderr_text}{exception_log}",
         encoding="utf-8",
     )
     _submit_stage_upload(config, issue.number, runner.stage_name, log_path)
+    if communicate_error is not None:
+        raise communicate_error
     if proc.returncode != 0:
         raise RuntimeError(
             f"{runner.stage_name} stage failed with exit code "
@@ -81,6 +96,9 @@ def _submit_stage_upload(
         return
     uploader = uploader_from_config(config)
     if uploader is None:
+        write_stage_log_fallback(
+            config, config.repo, issue_number, stage_name, log_path
+        )
         return
 
     from dispatcher.background import get_default_background
@@ -88,3 +106,12 @@ def _submit_stage_upload(
     get_default_background().submit_stage_upload(
         uploader, config.repo, issue_number, stage_name, log_path
     )
+
+
+def _captured_bytes(proc: object, attr_name: str, default: bytes) -> bytes:
+    value = getattr(proc, attr_name, default)
+    if isinstance(value, bytes):
+        return value
+    if isinstance(value, str):
+        return value.encode()
+    return default

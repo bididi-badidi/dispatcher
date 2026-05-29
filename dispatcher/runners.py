@@ -19,7 +19,7 @@ from dispatcher.constants import (
 from dispatcher.git import codex_git_write_dirs
 from dispatcher.models import Config, Issue
 from dispatcher.prompts import render_template
-from dispatcher.s3_logs import uploader_from_config
+from dispatcher.s3_logs import uploader_from_config, write_stage_log_fallback
 from dispatcher.subprocess_utils import print_subprocess_command
 
 
@@ -272,6 +272,9 @@ def _submit_stage_upload(
         return
     uploader = uploader_from_config(config)
     if uploader is None:
+        write_stage_log_fallback(
+            config, config.repo, issue_number, stage_name, log_path
+        )
         return
 
     from dispatcher.background import get_default_background

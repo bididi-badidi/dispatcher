@@ -397,6 +397,50 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.s3_log_bucket, "dispatcher-logs")
         self.assertEqual(config.s3_log_key_prefix, "prod")
 
+    def test_session_log_bucket_preferred_over_legacy_env(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dispatcher_dir = Path(temp_dir) / "dispatcher"
+            dispatcher_dir.mkdir()
+            with (
+                patch("pathlib.Path.cwd", return_value=dispatcher_dir),
+                patch.dict(
+                    "os.environ",
+                    {
+                        "DISPATCHER_REPO": "owner/repo",
+                        "DISPATCHER_SESSION_LOG_BUCKET": "new-logs",
+                        "DISPATCHER_SESSION_LOG_PREFIX": "new-prefix",
+                        "AWS_S3_LOG_BUCKET": "old-logs",
+                        "AWS_S3_LOG_KEY_PREFIX": "old-prefix",
+                    },
+                    clear=True,
+                ),
+            ):
+                config = build_config([])
+
+        self.assertEqual(config.s3_log_bucket, "new-logs")
+        self.assertEqual(config.s3_log_key_prefix, "new-prefix")
+
+    def test_legacy_s3_log_env_warns(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dispatcher_dir = Path(temp_dir) / "dispatcher"
+            dispatcher_dir.mkdir()
+            with (
+                patch("pathlib.Path.cwd", return_value=dispatcher_dir),
+                patch.dict(
+                    "os.environ",
+                    {
+                        "DISPATCHER_REPO": "owner/repo",
+                        "AWS_S3_LOG_BUCKET": "dispatcher-logs",
+                    },
+                    clear=True,
+                ),
+                self.assertLogs("dispatcher.config", level="WARNING") as logs,
+            ):
+                config = build_config([])
+
+        self.assertEqual(config.s3_log_bucket, "dispatcher-logs")
+        self.assertIn("AWS_S3_LOG_BUCKET is deprecated", logs.output[0])
+
     def test_aws_s3_log_bucket_unset_leaves_none(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             dispatcher_dir = Path(temp_dir) / "dispatcher"
@@ -408,6 +452,11 @@ class ConfigTests(unittest.TestCase):
                 config = build_config([])
 
         self.assertIsNone(config.s3_log_bucket)
+        self.assertEqual(config.s3_log_key_prefix, "logs")
+        self.assertEqual(
+            config.session_log_local_dir,
+            config.paths.log_dir / ".session_logs",
+        )
 
     def test_loads_dotenv_before_reading_environment_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

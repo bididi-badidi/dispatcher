@@ -1,3 +1,10 @@
+"""Operator-facing subprocess command echoes.
+
+The dispatcher workflow uses structured logging. This helper intentionally
+keeps a direct stdout echo so humans can see the exact external command being
+launched in CLI sessions.
+"""
+
 from __future__ import annotations
 
 import json
