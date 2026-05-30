@@ -16,6 +16,7 @@ wheels/
 __pycache__/
 .pytest_cache/
 .ruff_cache/
+.uv-cache/
 
 # Local dispatcher runtime state
 .dispatcher/

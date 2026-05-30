@@ -33,6 +33,7 @@ def list_triggered_issues(config: Config, repo: str) -> list[Issue]:
             "20",
         ],
         cwd=config.paths.project_dir,
+        debug=config.debug,
     )
     return [
         Issue(
