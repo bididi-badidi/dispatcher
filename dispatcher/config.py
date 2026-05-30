@@ -113,7 +113,8 @@ def resolve_base_branch(branch: str, cwd: Path | None = None) -> str:
         return branch
 
     warnings.warn(
-        f"Branch '{branch}' not found locally or remotely; falling back to 'main'.",
+        f"Branch '{branch}' not found locally or remotely; "
+        f"falling back to '{DEFAULT_BASE_BRANCH}'.",
         stacklevel=3,
     )
     if branch_exists(DEFAULT_BASE_BRANCH, cwd):
