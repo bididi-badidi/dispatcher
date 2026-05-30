@@ -67,6 +67,8 @@ On startup the dispatcher loads environment defaults from a `.env` file in the
 current dispatcher directory. Shell exports take precedence. Start from
 `.env.example` when creating a local `.env` file.
 
+Use `--debug` or `DISPATCHER_DEBUG=1` to print subprocess commands to stdout.
+
 See [docs/cli-reference.md](docs/cli-reference.md) for all flags and
 environment variables.
 

@@ -158,6 +158,11 @@ def build_config(argv: Sequence[str] | None = None) -> Config:
         help="Write stage commands to logs without running agents.",
     )
     parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable verbose subprocess command logging.",
+    )
+    parser.add_argument(
         "--poll-interval",
         type=positive_float,
         default=os.getenv(
@@ -192,6 +197,11 @@ def build_config(argv: Sequence[str] | None = None) -> Config:
     opus_model = os.getenv("DISPATCHER_OPUS_MODEL", DEFAULT_PLAN_OPUS_MODEL)
     s3_log_bucket = os.getenv("AWS_S3_LOG_BUCKET", "").strip() or None
     s3_log_key_prefix = os.getenv("AWS_S3_LOG_KEY_PREFIX", "").strip()
+    env_debug = os.getenv("DISPATCHER_DEBUG", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
     redis_poll_interval = positive_int(
         os.getenv("DISPATCHER_REDIS_POLL_INTERVAL", "60")
     )
@@ -237,6 +247,7 @@ def build_config(argv: Sequence[str] | None = None) -> Config:
         max_workers=args.max_workers,
         s3_log_bucket=s3_log_bucket,
         s3_log_key_prefix=s3_log_key_prefix,
+        debug=args.debug or env_debug,
     )
     validate_config(config)
     return config
