@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import io
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -35,19 +37,17 @@ class ReposCliTests(unittest.TestCase):
     def test_list_prints_sorted_store_members(self) -> None:
         store = MagicMock()
         store.get_repos.return_value = ["owner/a", "owner/z"]
+        stdout = io.StringIO()
 
         with (
             _configured_env(),
             patch.object(repos_cli, "RedisStateStore", return_value=store),
-            patch("sys.stdout") as stdout,
+            redirect_stdout(stdout),
         ):
             exit_code = repos_cli.main(["list"])
 
         self.assertEqual(exit_code, 0)
-        self.assertEqual(
-            [call.args[0] for call in stdout.write.call_args_list],
-            ["owner/a", "\n", "owner/z", "\n"],
-        )
+        self.assertEqual(stdout.getvalue(), "owner/a\nowner/z\n")
         store.close.assert_called_once_with()
 
     def test_remove_exits_zero_when_repo_is_absent(self) -> None:

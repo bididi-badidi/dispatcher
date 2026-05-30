@@ -109,6 +109,11 @@ def _submit_stage_upload(
 
 
 def _captured_bytes(proc: object, attr_name: str, default: bytes) -> bytes:
+    # asyncio.Process exposes stdout/stderr as StreamReader objects, not buffered
+    # bytes. When communicate() raises, asyncio does not provide a safe
+    # synchronous way to drain those streams from this exception path, so this
+    # helper only preserves bytes already supplied by test doubles or alternate
+    # process implementations.
     value = getattr(proc, attr_name, default)
     if isinstance(value, bytes):
         return value

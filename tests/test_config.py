@@ -441,6 +441,28 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.s3_log_bucket, "dispatcher-logs")
         self.assertIn("AWS_S3_LOG_BUCKET is deprecated", logs.output[0])
 
+    def test_legacy_s3_log_prefix_env_warns(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dispatcher_dir = Path(temp_dir) / "dispatcher"
+            dispatcher_dir.mkdir()
+            with (
+                patch("pathlib.Path.cwd", return_value=dispatcher_dir),
+                patch.dict(
+                    "os.environ",
+                    {
+                        "DISPATCHER_REPO": "owner/repo",
+                        "DISPATCHER_SESSION_LOG_BUCKET": "dispatcher-logs",
+                        "AWS_S3_LOG_KEY_PREFIX": "legacy-prefix",
+                    },
+                    clear=True,
+                ),
+                self.assertLogs("dispatcher.config", level="WARNING") as logs,
+            ):
+                config = build_config([])
+
+        self.assertEqual(config.s3_log_key_prefix, "legacy-prefix")
+        self.assertIn("AWS_S3_LOG_KEY_PREFIX is deprecated", logs.output[0])
+
     def test_aws_s3_log_bucket_unset_leaves_none(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             dispatcher_dir = Path(temp_dir) / "dispatcher"
