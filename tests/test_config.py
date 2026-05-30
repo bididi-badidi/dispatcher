@@ -13,6 +13,13 @@ from dispatcher.repo_context import config_for_repo
 
 
 class ConfigTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.branch_exists_patcher = patch(
+            "dispatcher.config.branch_exists", return_value=True
+        )
+        self.branch_exists_patcher.start()
+        self.addCleanup(self.branch_exists_patcher.stop)
+
     def test_defaults_to_repo_main_checkout(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             dispatcher_dir = Path(temp_dir) / "dispatcher"
@@ -45,6 +52,52 @@ class ConfigTests(unittest.TestCase):
             self.assertFalse(config.debug)
             self.assertEqual(config.opus_label, "automate:opus")
             self.assertEqual(config.opus_model, "claude-opus-4-7")
+
+    def test_base_branch_exists_is_used_unchanged(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dispatcher_dir = Path(temp_dir) / "dispatcher"
+            dispatcher_dir.mkdir()
+            with (
+                patch("pathlib.Path.cwd", return_value=dispatcher_dir),
+                patch.dict("os.environ", {"DISPATCHER_REPO": "owner/repo"}, clear=True),
+                patch("dispatcher.config.branch_exists", return_value=True),
+            ):
+                config = build_config(["--base-branch", "dev"])
+
+        self.assertEqual(config.base_branch, "dev")
+
+    def test_missing_base_branch_warns_and_falls_back_to_main(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dispatcher_dir = Path(temp_dir) / "dispatcher"
+            dispatcher_dir.mkdir()
+            with (
+                patch("pathlib.Path.cwd", return_value=dispatcher_dir),
+                patch.dict("os.environ", {"DISPATCHER_REPO": "owner/repo"}, clear=True),
+                patch(
+                    "dispatcher.config.branch_exists",
+                    side_effect=lambda branch, cwd=None: branch == "main",
+                ),
+                self.assertWarns(UserWarning),
+            ):
+                config = build_config(["--base-branch", "dev"])
+
+        self.assertEqual(config.base_branch, "main")
+
+    def test_missing_base_branch_and_main_raises_system_exit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dispatcher_dir = Path(temp_dir) / "dispatcher"
+            dispatcher_dir.mkdir()
+            with (
+                patch("pathlib.Path.cwd", return_value=dispatcher_dir),
+                patch.dict("os.environ", {"DISPATCHER_REPO": "owner/repo"}, clear=True),
+                patch("dispatcher.config.branch_exists", return_value=False),
+                self.assertWarns(UserWarning),
+            ):
+                with self.assertRaisesRegex(
+                    SystemExit,
+                    "fallback 'main' does not exist",
+                ):
+                    build_config(["--base-branch", "dev"])
 
     def test_dispatcher_root_dir_env_overrides_cwd(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

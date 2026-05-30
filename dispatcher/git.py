@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 from dispatcher.models import Config, Issue
@@ -63,6 +64,20 @@ def require_worktree_path(worktree: Path) -> None:
             "worktree stage completed without creating the expected worktree "
             f"directory: {worktree}"
         )
+
+
+def branch_exists(branch: str, cwd: Path | None = None) -> bool:
+    """Return True when a branch exists locally or on origin."""
+    run_kwargs = {"capture_output": True, "cwd": cwd, "text": True}
+
+    local = subprocess.run(["git", "branch", "--list", branch], **run_kwargs)
+    if local.stdout.strip():
+        return True
+
+    remote = subprocess.run(
+        ["git", "ls-remote", "--heads", "origin", branch], **run_kwargs
+    )
+    return bool(remote.stdout.strip())
 
 
 def repo_name_from_full_name(repo: str) -> str:

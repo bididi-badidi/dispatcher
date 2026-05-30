@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import warnings
 from pathlib import Path
 from typing import Sequence
 
@@ -17,6 +18,7 @@ from dispatcher.constants import (
     DEFAULT_STATE_FILE,
 )
 from dispatcher.git import (
+    branch_exists,
     default_projects_dir,
     default_worktree_root,
     repo_name_from_full_name,
@@ -106,6 +108,23 @@ def _strip_inline_comment(value: str) -> str:
     return value
 
 
+def resolve_base_branch(branch: str, cwd: Path | None = None) -> str:
+    if branch_exists(branch, cwd):
+        return branch
+
+    warnings.warn(
+        f"Branch '{branch}' not found locally or remotely; falling back to 'main'.",
+        stacklevel=3,
+    )
+    if branch_exists(DEFAULT_BASE_BRANCH, cwd):
+        return DEFAULT_BASE_BRANCH
+
+    raise SystemExit(
+        f"error: branch '{branch}' not found and fallback "
+        f"'{DEFAULT_BASE_BRANCH}' does not exist either"
+    )
+
+
 def build_config(argv: Sequence[str] | None = None) -> Config:
     load_env_file()
 
@@ -191,6 +210,7 @@ def build_config(argv: Sequence[str] | None = None) -> Config:
     args = parser.parse_args(argv)
 
     dispatcher_dir = resolve_root_dir()
+    args.base_branch = resolve_base_branch(args.base_branch, cwd=dispatcher_dir)
     repo = os.getenv("DISPATCHER_REPO")
     redis_url = os.getenv("DISPATCHER_REDIS_URL")
     opus_label = os.getenv("DISPATCHER_OPUS_LABEL", DEFAULT_OPUS_LABEL)

@@ -21,6 +21,7 @@ class CliTests(unittest.TestCase):
                 patch.dict(
                     "os.environ", {"DISPATCHER_REPO": "owner/target-repo"}, clear=True
                 ),
+                patch("dispatcher.config.branch_exists", return_value=True),
                 patch("dispatcher.cli._run_daemon", return_value=0) as run_daemon,
             ):
                 result = main(["--daemon"])
@@ -173,6 +174,7 @@ class CliTests(unittest.TestCase):
                 patch.dict(
                     "os.environ", {"DISPATCHER_REPO": "owner/target-repo"}, clear=True
                 ),
+                patch("dispatcher.config.branch_exists", return_value=True),
                 patch("dispatcher.cli.StateStore") as state_store,
                 patch("dispatcher.cli.run_once", return_value=False),
             ):
