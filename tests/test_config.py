@@ -420,6 +420,27 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.s3_log_bucket, "new-logs")
         self.assertEqual(config.s3_log_key_prefix, "new-prefix")
 
+    def test_blank_session_log_prefix_defaults_to_logs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dispatcher_dir = Path(temp_dir) / "dispatcher"
+            dispatcher_dir.mkdir()
+            with (
+                patch("pathlib.Path.cwd", return_value=dispatcher_dir),
+                patch.dict(
+                    "os.environ",
+                    {
+                        "DISPATCHER_REPO": "owner/repo",
+                        "DISPATCHER_SESSION_LOG_BUCKET": "dispatcher-logs",
+                        "DISPATCHER_SESSION_LOG_PREFIX": "",
+                    },
+                    clear=True,
+                ),
+            ):
+                config = build_config([])
+
+        self.assertEqual(config.s3_log_bucket, "dispatcher-logs")
+        self.assertEqual(config.s3_log_key_prefix, "logs")
+
     def test_legacy_s3_log_env_warns(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             dispatcher_dir = Path(temp_dir) / "dispatcher"

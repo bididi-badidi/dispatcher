@@ -35,6 +35,21 @@ class DispatcherFormatter(logging.Formatter):
         return f"{message} {json.dumps(extras, sort_keys=True)}"
 
 
+class DispatcherStreamHandler(logging.Handler):
+    """Route operator logs to stdout, but keep ERROR+ diagnostics on stderr."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            message = self.format(record)
+            stream = sys.stderr if record.levelno >= logging.ERROR else sys.stdout
+            stream.write(message + self.terminator)
+            stream.flush()
+        except Exception:
+            self.handleError(record)
+
+    terminator = "\n"
+
+
 def configure_logging(level: str | None = None) -> None:
     logger = logging.getLogger("dispatcher")
     logger.setLevel(_parse_level(level or os.getenv("DISPATCHER_LOG_LEVEL") or "INFO"))
@@ -48,7 +63,7 @@ def configure_logging(level: str | None = None) -> None:
             )
             return
 
-    handler = logging.StreamHandler(sys.stdout)
+    handler = DispatcherStreamHandler()
     setattr(handler, _DISPATCHER_HANDLER, True)
     handler.setFormatter(
         DispatcherFormatter("%(asctime)s %(levelname)s %(name)s %(message)s")

@@ -3,7 +3,6 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 from tests.helpers import make_config
 from dispatcher.s3_logs import (
@@ -23,61 +22,6 @@ class FakeS3Client:
 
 
 class S3LogTests(unittest.TestCase):
-    def test_from_env_disabled_when_bucket_unset_or_blank(self) -> None:
-        with patch.dict("os.environ", {}, clear=True):
-            self.assertIsNone(S3LogUploader.from_env())
-
-        with patch.dict("os.environ", {"AWS_S3_LOG_BUCKET": ""}, clear=True):
-            self.assertIsNone(S3LogUploader.from_env())
-
-    def test_from_env_enabled(self) -> None:
-        with patch.dict(
-            "os.environ",
-            {
-                "DISPATCHER_SESSION_LOG_BUCKET": "logs",
-                "DISPATCHER_SESSION_LOG_PREFIX": "sessions",
-            },
-            clear=True,
-        ):
-            uploader = S3LogUploader.from_env()
-
-        self.assertIsNotNone(uploader)
-        assert uploader is not None
-        self.assertTrue(uploader.is_enabled())
-        self.assertEqual(uploader.key_prefix, "sessions/")
-
-    def test_from_env_blank_primary_prefix_defaults_to_logs(self) -> None:
-        with patch.dict(
-            "os.environ",
-            {
-                "DISPATCHER_SESSION_LOG_BUCKET": "logs",
-                "DISPATCHER_SESSION_LOG_PREFIX": "",
-            },
-            clear=True,
-        ):
-            uploader = S3LogUploader.from_env()
-
-        assert uploader is not None
-        self.assertEqual(uploader.key_prefix, "logs/")
-
-    def test_from_env_legacy_prefix_warns(self) -> None:
-        with (
-            patch.dict(
-                "os.environ",
-                {
-                    "DISPATCHER_SESSION_LOG_BUCKET": "logs",
-                    "AWS_S3_LOG_KEY_PREFIX": "legacy-prefix",
-                },
-                clear=True,
-            ),
-            self.assertLogs("dispatcher.s3_logs", level="WARNING") as logs,
-        ):
-            uploader = S3LogUploader.from_env()
-
-        assert uploader is not None
-        self.assertEqual(uploader.key_prefix, "legacy-prefix/")
-        self.assertIn("AWS_S3_LOG_KEY_PREFIX is deprecated", logs.output[0])
-
     def test_local_stage_fallback_copies_log_when_bucket_unset(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

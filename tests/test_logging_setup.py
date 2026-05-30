@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import logging
+import io
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
 from dispatcher.logging_setup import (
     DispatcherFormatter,
+    DispatcherStreamHandler,
     configure_logging,
     redact_state,
 )
@@ -38,6 +41,46 @@ class LoggingSetupTests(unittest.TestCase):
 
         self.assertEqual(len(self.logger.handlers), 1)
         self.assertEqual(self.logger.level, logging.WARNING)
+
+    def test_configure_logging_routes_errors_to_stderr(self) -> None:
+        configure_logging("INFO")
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            self.logger.info("operator message")
+            self.logger.error("failure message")
+
+        self.assertIn("operator message", stdout.getvalue())
+        self.assertNotIn("failure message", stdout.getvalue())
+        self.assertIn("failure message", stderr.getvalue())
+
+    def test_dispatcher_stream_handler_routes_error_records_to_stderr(self) -> None:
+        handler = DispatcherStreamHandler()
+        handler.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
+        logger = logging.getLogger("dispatcher.stream-test")
+        original_handlers = list(logger.handlers)
+        original_level = logger.level
+        original_propagate = logger.propagate
+        logger.handlers.clear()
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+        logger.propagate = False
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        try:
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                logger.warning("warning message")
+                logger.error("error message")
+        finally:
+            logger.handlers.clear()
+            logger.handlers.extend(original_handlers)
+            logger.setLevel(original_level)
+            logger.propagate = original_propagate
+
+        self.assertIn("warning message", stdout.getvalue())
+        self.assertIn("error message", stderr.getvalue())
 
     def test_dispatcher_formatter_appends_extra_fields_as_json(self) -> None:
         record = logging.LogRecord(

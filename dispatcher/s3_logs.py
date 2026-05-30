@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import io
 import logging
-import os
 import shutil
 from functools import lru_cache
 from pathlib import Path
@@ -31,31 +30,6 @@ class S3LogUploader:
         self.bucket = bucket
         self.key_prefix = _normalize_key_prefix(key_prefix)
         self._client = client
-
-    @classmethod
-    def from_env(cls) -> S3LogUploader | None:
-        bucket = os.getenv("DISPATCHER_SESSION_LOG_BUCKET", "").strip()
-        if not bucket:
-            bucket = os.getenv("AWS_S3_LOG_BUCKET", "").strip()
-            if bucket:
-                LOGGER.warning(
-                    "AWS_S3_LOG_BUCKET is deprecated; use "
-                    "DISPATCHER_SESSION_LOG_BUCKET instead"
-                )
-        if not bucket:
-            return None
-        key_prefix = os.getenv("DISPATCHER_SESSION_LOG_PREFIX")
-        if key_prefix is None:
-            legacy_prefix = os.getenv("AWS_S3_LOG_KEY_PREFIX")
-            if legacy_prefix is not None and legacy_prefix.strip():
-                LOGGER.warning(
-                    "AWS_S3_LOG_KEY_PREFIX is deprecated; use "
-                    "DISPATCHER_SESSION_LOG_PREFIX instead"
-                )
-                key_prefix = legacy_prefix
-            else:
-                key_prefix = "logs"
-        return cls(bucket, key_prefix.strip() or "logs")
 
     def is_enabled(self) -> bool:
         return bool(self.bucket)
