@@ -32,7 +32,7 @@ async def async_run_stage(
     repo_log_dir = config.paths.log_dir / config.repo
     repo_log_dir.mkdir(parents=True, exist_ok=True)
     log_path = repo_log_dir / f"issue-{issue.number}-{runner.stage_name}.log"
-    version = await asyncio.to_thread(runner.version)
+    version = await asyncio.to_thread(runner.version, debug=config.debug)
     command_text = shlex.join(command)
     stdin_text = runner.stdin(prompt)
     stdin_log = f"\n\n[stdin]\n{stdin_text}" if stdin_text is not None else ""
@@ -45,7 +45,7 @@ async def async_run_stage(
         _submit_stage_upload(config, issue.number, runner.stage_name, log_path)
         return ""
 
-    print_subprocess_command(command)
+    print_subprocess_command(command, debug=config.debug)
     proc = await asyncio.create_subprocess_exec(
         *command,
         cwd=cwd,

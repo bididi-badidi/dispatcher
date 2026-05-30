@@ -21,11 +21,39 @@ from tests.helpers import make_config
 
 
 class RunnerTests(unittest.TestCase):
-    def test_agent_runner_prints_version_and_launch_commands_to_stdout(self) -> None:
+    def test_agent_runner_is_silent_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             worktree = Path(temp_dir)
             (worktree / ".git").mkdir()
             config = make_config(worktree, dry_run=False)
+            runner = CodexRunner("build $issue_number")
+            version = subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="codex-cli 1.0", stderr=""
+            )
+            run = subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="", stderr=""
+            )
+
+            with (
+                patch("builtins.print") as print_,
+                patch("dispatcher.runners.subprocess.run", side_effect=[version, run]),
+            ):
+                runner.run(
+                    Issue(2, "Build", "https://example.test/2"),
+                    config,
+                    worktree,
+                    "feat/issue-2",
+                )
+
+            print_.assert_not_called()
+
+    def test_agent_runner_prints_version_and_launch_commands_when_debug_true(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            worktree = Path(temp_dir)
+            (worktree / ".git").mkdir()
+            config = replace(make_config(worktree, dry_run=False), debug=True)
             runner = CodexRunner("build $issue_number")
             version = subprocess.CompletedProcess(
                 args=[], returncode=0, stdout="codex-cli 1.0", stderr=""

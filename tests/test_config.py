@@ -42,6 +42,7 @@ class ConfigTests(unittest.TestCase):
             )
             self.assertEqual(config.poll_interval_seconds, 120.0)
             self.assertFalse(config.once)
+            self.assertFalse(config.debug)
             self.assertEqual(config.opus_label, "automate:opus")
             self.assertEqual(config.opus_model, "claude-opus-4-7")
 
@@ -375,6 +376,37 @@ class ConfigTests(unittest.TestCase):
 
         self.assertEqual(config.repo, "owner/repo")
         self.assertIsNone(config.redis_url)
+
+    def test_reads_debug_from_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dispatcher_dir = Path(temp_dir) / "dispatcher"
+            dispatcher_dir.mkdir()
+            with (
+                patch("pathlib.Path.cwd", return_value=dispatcher_dir),
+                patch.dict(
+                    "os.environ",
+                    {
+                        "DISPATCHER_REPO": "owner/repo",
+                        "DISPATCHER_DEBUG": "1",
+                    },
+                    clear=True,
+                ),
+            ):
+                config = build_config([])
+
+        self.assertTrue(config.debug)
+
+    def test_accepts_debug_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dispatcher_dir = Path(temp_dir) / "dispatcher"
+            dispatcher_dir.mkdir()
+            with (
+                patch("pathlib.Path.cwd", return_value=dispatcher_dir),
+                patch.dict("os.environ", {"DISPATCHER_REPO": "owner/repo"}, clear=True),
+            ):
+                config = build_config(["--debug"])
+
+        self.assertTrue(config.debug)
 
     def test_aws_s3_log_bucket_env_populates_config(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

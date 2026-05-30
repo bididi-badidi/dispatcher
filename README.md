@@ -81,6 +81,7 @@ Useful options:
 - `--max-workers 3` sets the daemon worker count.
 - `--dry-run` writes the stage commands to `.dispatcher/logs/` without running
   Gemini, Claude, or Codex.
+- `--debug` or `DISPATCHER_DEBUG=1` prints subprocess commands to stdout.
 - The worktree stage must create the path selected by the dispatcher before
   planning can start.
 
