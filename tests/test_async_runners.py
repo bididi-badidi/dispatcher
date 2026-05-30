@@ -26,7 +26,7 @@ class FakeRunner(AgentRunner):
     def stdin(self, prompt: str) -> str:
         return prompt
 
-    def version(self) -> str:
+    def version(self, *, debug: bool = False) -> str:
         return "fake 1.0"
 
 

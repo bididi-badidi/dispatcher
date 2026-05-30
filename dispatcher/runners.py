@@ -51,10 +51,10 @@ class AgentRunner(ABC):
     def stdin(self, prompt: str) -> str | None:
         return None
 
-    def version(self) -> str:
+    def version(self, *, debug: bool = False) -> str:
         try:
             command = [self.executable, *self.version_args]
-            print_subprocess_command(command)
+            print_subprocess_command(command, debug=debug)
             completed = subprocess.run(
                 command,
                 check=False,
@@ -79,7 +79,7 @@ class AgentRunner(ABC):
         repo_log_dir = config.paths.log_dir / config.repo
         repo_log_dir.mkdir(parents=True, exist_ok=True)
         log_path = repo_log_dir / f"issue-{issue.number}-{self.stage_name}.log"
-        version = self.version()
+        version = self.version(debug=config.debug)
         command_text = shlex.join(command)
         stdin_text = self.stdin(prompt)
         stdin_log = f"\n\n[stdin]\n{stdin_text}" if stdin_text is not None else ""
@@ -92,7 +92,7 @@ class AgentRunner(ABC):
             _submit_stage_upload(config, issue.number, self.stage_name, log_path)
             return ""
 
-        print_subprocess_command(command)
+        print_subprocess_command(command, debug=config.debug)
         completed = subprocess.run(
             command,
             cwd=cwd,
