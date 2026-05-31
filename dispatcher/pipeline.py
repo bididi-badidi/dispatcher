@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Sequence
 
 from dispatcher.git import (
@@ -7,17 +8,31 @@ from dispatcher.git import (
     require_worktree_path,
     worktree_path_for_issue,
 )
+from dispatcher.github import initial_review_cursor, pr_number_from_url
 from dispatcher.models import Config, Issue, IssueState
 from dispatcher.runners import build_stage_runners, run_stage
 from dispatcher.s3_logs import issue_stage_log_paths, uploader_from_config
 from dispatcher.state_backend import StateBackend
 from dispatcher.time_utils import utc_now
 
+_PR_URL_RE = re.compile(r"https://github\.com/[^\s]+/pull/\d+")
+_STARTED_OR_TERMINAL_STATUSES = {
+    "started",
+    "planned",
+    "built",
+    "pr_opened",
+    "pr_review_queued",
+    "merged",
+    "closed",
+    "cleaned_up",
+    "failed",
+}
+
 
 def run_pipeline(issue: Issue, config: Config, store: StateBackend) -> IssueState:
     repo = _require_repo(config)
     existing = store.get(repo, issue.number)
-    if existing and existing.get("status") in {"started", "planned", "built", "failed"}:
+    if existing and existing.get("status") in _STARTED_OR_TERMINAL_STATUSES:
         return IssueState(**existing)
 
     worktree = worktree_path_for_issue(config, issue)
@@ -47,8 +62,22 @@ def run_pipeline(issue: Issue, config: Config, store: StateBackend) -> IssueStat
         state.updated_at = utc_now()
         store.upsert(repo, state)
 
-        run_stage("build", runners["build"], issue, config, worktree, branch)
-        state.status = "built"
+        build_output = run_stage(
+            "build", runners["build"], issue, config, worktree, branch
+        )
+        pr_url = _extract_pr_url(build_output)
+        if pr_url:
+            state.status = "pr_opened"
+            state.pr_url = pr_url
+            (
+                state.pr_review_cursor,
+                state.pr_issue_comment_cursor,
+                state.pr_review_comment_cursor,
+            ) = initial_review_cursor(config, repo, pr_number_from_url(pr_url))
+        elif config.dry_run:
+            state.status = "built"
+        else:
+            raise RuntimeError("build stage did not print a GitHub PR URL")
         state.updated_at = utc_now()
         store.upsert(repo, state)
     except Exception as exc:
@@ -77,6 +106,11 @@ def _require_repo(config: Config) -> str:
     if config.repo is None:
         raise RuntimeError("pipeline requires a concrete repository")
     return config.repo
+
+
+def _extract_pr_url(output: str) -> str | None:
+    match = _PR_URL_RE.search(output)
+    return match.group(0) if match else None
 
 
 def _submit_issue_upload(config: Config, issue_number: int) -> None:

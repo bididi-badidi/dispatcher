@@ -68,7 +68,7 @@ class AgentRunner(ABC):
         output = (completed.stdout or completed.stderr).strip()
         return output or f"unknown (exit {completed.returncode})"
 
-    def run(self, issue: Issue, config: Config, worktree: Path, branch: str) -> None:
+    def run(self, issue: Issue, config: Config, worktree: Path, branch: str) -> str:
         prompt = self.prompt(issue, config, worktree, branch)
         cwd = self.cwd(config, worktree)
         command = self.command_for(issue, prompt, cwd)
@@ -90,7 +90,7 @@ class AgentRunner(ABC):
                 encoding="utf-8",
             )
             _submit_stage_upload(config, issue.number, self.stage_name, log_path)
-            return
+            return ""
 
         print_subprocess_command(command, debug=config.debug)
         completed = subprocess.run(
@@ -112,6 +112,7 @@ class AgentRunner(ABC):
                 f"{self.stage_name} stage failed with exit code "
                 f"{completed.returncode}; see {log_path}"
             )
+        return completed.stdout
 
     def _validate_command(self, command: Sequence[str]) -> None:
         used_banned_flags = sorted(BANNED_AGENT_FLAGS.intersection(command))
@@ -259,17 +260,18 @@ def run_stage(
     config: Config,
     worktree: Path,
     branch: str,
-) -> None:
+) -> str:
     if runner.stage_name != name:
         raise ValueError(f"runner {runner.stage_name!r} cannot run {name!r}")
-    runner.run(issue, config, worktree, branch)
+    return runner.run(issue, config, worktree, branch)
 
 
 def _submit_stage_upload(
     config: Config, issue_number: int, stage_name: str, log_path: Path
 ) -> None:
-    if config.repo is None:
-        return
+    repo = config.repo
+    if repo is None:
+        raise RuntimeError("runner requires a concrete repository")
     uploader = uploader_from_config(config)
     if uploader is None:
         return
@@ -277,5 +279,5 @@ def _submit_stage_upload(
     from dispatcher.background import get_default_background
 
     get_default_background().submit_stage_upload(
-        uploader, config.repo, issue_number, stage_name, log_path
+        uploader, repo, issue_number, stage_name, log_path
     )

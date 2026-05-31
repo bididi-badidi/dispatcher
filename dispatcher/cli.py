@@ -44,6 +44,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         store = StateStore(config.paths.state_file)
 
+    _log_tracking_summary(config, store)
+
+    if config.once:
+        run_once(config, store)
+        return 0
+
+    if config.daemon:
+        return _run_daemon(config, store)
+
     try:
         if config.once:
             run_once(config, store)
@@ -97,3 +106,8 @@ def _repos_for_polling(config: Config, store: StateBackend) -> list[str]:
     if config.repo:
         return [config.repo]
     return []
+
+
+def _log_tracking_summary(config: Config, store: StateBackend) -> None:
+    repos = _repos_for_polling(config, store)
+    print(f"tracking {len(repos)} repo(s)")
