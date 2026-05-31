@@ -92,11 +92,11 @@ class QueueTests(unittest.TestCase):
                 issue = Issue(99, "Log me", "https://example.test/99")
                 task = Task(config.repo, issue)
 
-                with patch("builtins.print") as mock_print:
+                with patch("dispatcher.queue.LOGGER.info") as mock_info:
                     accepted = await dispatcher._enqueue_task(task)
 
                 self.assertTrue(accepted)
-                printed = " ".join(str(c) for c in mock_print.call_args_list)
+                printed = " ".join(str(c) for c in mock_info.call_args_list)
                 self.assertIn("[INFO] task queued", printed)
                 self.assertIn("issue=99", printed)
                 self.assertIn("type=fresh", printed)
@@ -112,11 +112,11 @@ class QueueTests(unittest.TestCase):
 
             issue = Issue(42, "Review me", "https://example.test/42")
 
-            with patch("builtins.print") as mock_print:
+            with patch("dispatcher.queue.LOGGER.info") as mock_info:
                 accepted = dispatcher.enqueue_review(issue)
 
             self.assertTrue(accepted)
-            printed = " ".join(str(c) for c in mock_print.call_args_list)
+            printed = " ".join(str(c) for c in mock_info.call_args_list)
             self.assertIn("[INFO] task queued", printed)
             self.assertIn("issue=42", printed)
             self.assertIn("type=review", printed)
