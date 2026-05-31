@@ -177,8 +177,9 @@ class Dispatcher:
         self._in_flight.add((task.repo, task.issue.number))
 
     def _log_enqueued(self, task: Task) -> None:
+        task_id = f"{task.repo}#{task.issue.number}:{task.task_type.value}"
         print(
-            f"[INFO] task queued | repo={task.repo} issue={task.issue.number}"
+            f"[INFO] task queued | id={task_id} repo={task.repo} issue={task.issue.number}"
             f" type={task.task_type.value} queued_at={utc_now()}"
             f" queue_depth={self._queue.qsize()}"
         )
