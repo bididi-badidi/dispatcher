@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import enum
+import logging
 import signal
 import sys
 from dataclasses import dataclass
@@ -18,6 +19,8 @@ from dispatcher.models import Config, Issue, IssueState
 from dispatcher.repo_context import config_for_repo
 from dispatcher.state_backend import StateBackend
 from dispatcher.time_utils import utc_now
+
+LOGGER = logging.getLogger(__name__)
 
 
 class TaskType(enum.Enum):
@@ -211,6 +214,7 @@ class Dispatcher:
         except asyncio.QueueFull:
             self._in_flight.discard((task.repo, task.issue.number))
             return False
+        self._log_enqueued(task)
         return True
 
     def snapshot(self) -> QueueSnapshot:
@@ -243,6 +247,14 @@ class Dispatcher:
     def _mark_queued(self, task: Task) -> None:
         self._in_flight.add((task.repo, task.issue.number))
 
+    def _log_enqueued(self, task: Task) -> None:
+        task_id = f"{task.repo}#{task.issue.number}:{task.task_type.value}"
+        LOGGER.info(
+            f"[INFO] task queued | id={task_id} repo={task.repo} issue={task.issue.number}"
+            f" type={task.task_type.value} queued_at={utc_now()}"
+            f" queue_depth={self._queue.qsize()}"
+        )
+
     async def _enqueue_task(self, task: Task) -> bool:
         self._mark_queued(task)
         while not self._shutdown.is_set():
@@ -251,6 +263,7 @@ class Dispatcher:
                     self._queue.put(task),
                     timeout=self._QUEUE_PUT_TIMEOUT_SECONDS,
                 )
+                self._log_enqueued(task)
                 return True
             except TimeoutError:
                 pass
