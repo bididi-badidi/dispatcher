@@ -180,10 +180,18 @@ class Dispatcher:
         self._in_flight.add((task.repo, task.issue.number))
 
     def _log_enqueued(self, task: Task) -> None:
+        if not LOGGER.isEnabledFor(logging.INFO):
+            return
+
+        task_id = f"{task.repo}#{task.issue.number}:{task.task_type.value}"
         LOGGER.info(
-            f"task queued | repo={task.repo} issue={task.issue.number}"
-            f" type={task.task_type.value} queued_at={utc_now()}"
-            f" queue_depth={self._queue.qsize()}"
+            "task queued | id=%s repo=%s issue=%s type=%s queued_at=%s queue_depth=%d",
+            task_id,
+            task.repo,
+            task.issue.number,
+            task.task_type.value,
+            utc_now(),
+            self._queue.qsize(),
         )
 
     async def _enqueue_task(self, task: Task) -> bool:
