@@ -70,6 +70,7 @@ def _configure_logging(config: Config) -> None:
     logging.basicConfig(
         level=logging.DEBUG if config.debug else logging.INFO,
         format="%(message)s",
+        force=True,
     )
 
 

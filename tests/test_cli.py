@@ -28,7 +28,7 @@ class CliTests(unittest.TestCase):
                 _configure_logging(config)
 
             basic_config.assert_called_once_with(
-                level=logging.INFO, format="%(message)s"
+                level=logging.INFO, format="%(message)s", force=True
             )
 
     def test_configure_logging_uses_debug_level_when_enabled(self) -> None:
@@ -40,7 +40,7 @@ class CliTests(unittest.TestCase):
                 _configure_logging(config)
 
             basic_config.assert_called_once_with(
-                level=logging.DEBUG, format="%(message)s"
+                level=logging.DEBUG, format="%(message)s", force=True
             )
 
     def test_main_runs_daemon_when_requested(self) -> None:
