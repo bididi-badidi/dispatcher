@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 from dispatcher.models import Config, Issue
+
+BRANCH_REMOTE_LOOKUP_TIMEOUT_SECONDS = 5
 
 
 def worktree_git_dir(worktree: Path) -> Path | None:
@@ -63,6 +66,35 @@ def require_worktree_path(worktree: Path) -> None:
             "worktree stage completed without creating the expected worktree "
             f"directory: {worktree}"
         )
+
+
+def branch_exists(branch: str, cwd: Path | None = None) -> bool:
+    """Return True when a branch exists locally or on origin."""
+    if cwd is not None and not cwd.exists():
+        return False
+
+    run_kwargs = {"capture_output": True, "cwd": cwd, "text": True}
+
+    for ref in (f"refs/heads/{branch}", f"refs/remotes/origin/{branch}"):
+        result = _run_git(["git", "show-ref", "--verify", "--quiet", ref], run_kwargs)
+        if result.returncode == 0:
+            return True
+
+    remote = _run_git(
+        ["git", "ls-remote", "--heads", "origin", branch],
+        {**run_kwargs, "timeout": BRANCH_REMOTE_LOOKUP_TIMEOUT_SECONDS},
+    )
+    return bool(remote.stdout.strip())
+
+
+def _run_git(
+    command: list[str],
+    run_kwargs: dict[str, object],
+) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(command, **run_kwargs)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return subprocess.CompletedProcess(command, returncode=1, stdout="", stderr="")
 
 
 def repo_name_from_full_name(repo: str) -> str:

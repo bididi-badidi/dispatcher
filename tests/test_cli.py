@@ -21,6 +21,8 @@ class CliTests(unittest.TestCase):
                 patch.dict(
                     "os.environ", {"DISPATCHER_REPO": "owner/target-repo"}, clear=True
                 ),
+                patch("dispatcher.config.branch_exists", return_value=True),
+                patch("dispatcher.config.checkout_exists", return_value=True),
                 patch("dispatcher.cli._run_daemon", return_value=0) as run_daemon,
             ):
                 result = main(["--daemon"])
@@ -38,6 +40,8 @@ class CliTests(unittest.TestCase):
                 patch.dict(
                     "os.environ", {"DISPATCHER_REPO": "owner/target-repo"}, clear=True
                 ),
+                patch("dispatcher.config.branch_exists", return_value=True),
+                patch("dispatcher.config.checkout_exists", return_value=True),
                 patch("dispatcher.cli.run_once", return_value=False),
                 patch("builtins.print") as print_,
             ):
@@ -63,6 +67,8 @@ class CliTests(unittest.TestCase):
                 patch.dict(
                     "os.environ", {"DISPATCHER_REPO": "owner/target-repo"}, clear=True
                 ),
+                patch("dispatcher.config.branch_exists", return_value=True),
+                patch("dispatcher.config.checkout_exists", return_value=True),
                 patch("dispatcher.cli.run_polling_loop", side_effect=stop_polling),
                 patch("builtins.print") as print_,
             ):
@@ -106,6 +112,8 @@ class CliTests(unittest.TestCase):
                 patch.dict(
                     "os.environ", {"DISPATCHER_REPO": "owner/target-repo"}, clear=True
                 ),
+                patch("dispatcher.config.branch_exists", return_value=True),
+                patch("dispatcher.config.checkout_exists", return_value=True),
                 patch("dispatcher.cli._run_daemon", return_value=0),
                 patch("builtins.print") as print_,
             ):
@@ -136,7 +144,10 @@ class CliTests(unittest.TestCase):
             store = StateStore(config.paths.state_file)
 
             with patch("dispatcher.cli.run_once") as run_once:
-                with self.assertRaises(KeyboardInterrupt):
+                with (
+                    patch("builtins.print") as print_,
+                    self.assertRaises(KeyboardInterrupt),
+                ):
                     run_polling_loop(
                         config,
                         store,
@@ -146,6 +157,9 @@ class CliTests(unittest.TestCase):
                     )
 
             run_once.assert_called_once_with(config, store)
+            print_.assert_called_once_with(
+                "Polling for label 'automate' every 120 seconds. Press Ctrl-C to stop."
+            )
 
     def test_polling_loop_continues_after_cycle_error(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -159,10 +173,32 @@ class CliTests(unittest.TestCase):
                 raise KeyboardInterrupt()
 
             with patch("dispatcher.cli.run_once", side_effect=RuntimeError("boom")):
-                with self.assertRaises(KeyboardInterrupt):
+                with (
+                    patch("builtins.print"),
+                    self.assertRaises(KeyboardInterrupt),
+                ):
                     run_polling_loop(config, store, sleep=sleep)
 
             self.assertEqual(calls, [120.0])
+
+    def test_tracking_summary_tolerates_repo_count_error(self) -> None:
+        root = Path(tempfile.mkdtemp())
+        config = make_config(root, repo=None)
+
+        class FailingRepoStore:
+            def get_repos(self) -> list[str]:
+                raise RuntimeError("redis unavailable")
+
+            def get(self, repo: str, issue_number: int) -> None:
+                return None
+
+            def upsert(self, repo, state) -> None:
+                raise AssertionError("unexpected write")
+
+        with patch("builtins.print") as print_:
+            _log_tracking_summary(config, FailingRepoStore())
+
+        print_.assert_called_once_with("tracking unknown repo(s)")
 
     def test_main_uses_local_store_without_redis_url(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -173,6 +209,8 @@ class CliTests(unittest.TestCase):
                 patch.dict(
                     "os.environ", {"DISPATCHER_REPO": "owner/target-repo"}, clear=True
                 ),
+                patch("dispatcher.config.branch_exists", return_value=True),
+                patch("dispatcher.config.checkout_exists", return_value=True),
                 patch("dispatcher.cli.StateStore") as state_store,
                 patch("dispatcher.cli.run_once", return_value=False),
             ):

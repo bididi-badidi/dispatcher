@@ -68,11 +68,7 @@ class Dispatcher:
 
     async def run(self) -> None:
         self._install_signal_handlers()
-        print(
-            f"Polling for label {self.config.label!r} every "
-            f"{self.config.poll_interval_seconds:g} seconds with "
-            f"{self.max_workers} worker(s). Press Ctrl-C to stop."
-        )
+        print(self._startup_message())
         poller = asyncio.create_task(self._poller())
         workers = [
             asyncio.create_task(self._worker(worker_id))
@@ -284,6 +280,13 @@ class Dispatcher:
         if self.config.repo:
             return [self.config.repo]
         return []
+
+    def _startup_message(self) -> str:
+        return (
+            f"Polling for label {self.config.label!r} every "
+            f"{self.config.poll_interval_seconds:g} seconds with "
+            f"{self.max_workers} worker(s). Press Ctrl-C to stop."
+        )
 
     def _require_single_repo(self) -> str:
         if self.config.repo is None:

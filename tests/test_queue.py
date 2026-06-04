@@ -341,3 +341,24 @@ class QueueTests(unittest.TestCase):
             dispatcher = Dispatcher(config, RedisLikeStore(), max_workers=1)
 
             self.assertEqual(dispatcher._get_repos(), ["example/one", "example/two"])
+
+    def test_startup_message_includes_worker_count(self) -> None:
+        class RedisLikeStore:
+            def get_repos(self) -> list[str]:
+                return ["example/one", "example/two"]
+
+            def get(self, repo: str, issue_number: int) -> None:
+                return None
+
+            def upsert(self, repo, state) -> None:
+                raise AssertionError("unexpected write")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = make_config(Path(temp_dir), repo=None)
+            dispatcher = Dispatcher(config, RedisLikeStore(), max_workers=3)
+
+            self.assertEqual(
+                dispatcher._startup_message(),
+                "Polling for label 'automate' every 120 seconds with "
+                "3 worker(s). Press Ctrl-C to stop.",
+            )
