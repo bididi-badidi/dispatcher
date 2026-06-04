@@ -14,6 +14,7 @@ from dispatcher.git import (
     require_worktree_path,
     worktree_path_for_issue,
 )
+from dispatcher.github import initial_review_cursor, pr_number_from_url
 from dispatcher.models import Config, Issue, IssueState
 from dispatcher.prompts import (
     default_open_pr_command,
@@ -63,6 +64,9 @@ class PipelineState(TypedDict, total=False):
     quality_review_feedback: str | None
     max_iterations: int
     pr_url: str | None
+    pr_review_cursor: int | None
+    pr_issue_comment_cursor: int | None
+    pr_review_comment_cursor: int | None
     status: str
     error: str | None
 
@@ -104,6 +108,9 @@ async def async_run_langgraph_pipeline(
         "quality_review_feedback": None,
         "max_iterations": max_iterations,
         "pr_url": None,
+        "pr_review_cursor": None,
+        "pr_issue_comment_cursor": None,
+        "pr_review_comment_cursor": None,
         "status": "started",
         "error": None,
     }
@@ -117,6 +124,13 @@ async def async_run_langgraph_pipeline(
             "quality_review_feedback"
         )
         initial_state["pr_url"] = existing.get("pr_url")
+        initial_state["pr_review_cursor"] = existing.get("pr_review_cursor")
+        initial_state["pr_issue_comment_cursor"] = existing.get(
+            "pr_issue_comment_cursor"
+        )
+        initial_state["pr_review_comment_cursor"] = existing.get(
+            "pr_review_comment_cursor"
+        )
 
     graph = _build_graph(config, store, issue, shutdown_event)
     try:
@@ -134,6 +148,9 @@ async def async_run_langgraph_pipeline(
             "quality_review",
             "quality_review_feedback",
             "pr_url",
+            "pr_review_cursor",
+            "pr_issue_comment_cursor",
+            "pr_review_comment_cursor",
         ):
             if key in latest:
                 failed_state[key] = latest[key]
@@ -283,6 +300,15 @@ def _build_graph(
 
     async def open_pr(state: PipelineState) -> dict[str, object]:
         _raise_if_shutdown(shutdown_event)
+        if state.get("task_type") == "review" and state.get("pr_url"):
+            updates = {
+                "status": "pr_opened",
+                "worker_id": None,
+                "error": None,
+            }
+            _persist_state(config, store, state | updates)
+            return updates
+
         output = await async_run_stage(
             "open_pr",
             GeminiPrRunner(default_open_pr_command()),
@@ -295,9 +321,15 @@ def _build_graph(
         pr_url = match.group(0) if match else state.get("pr_url")
         if not pr_url:
             raise RuntimeError("open_pr stage did not print a GitHub PR URL")
+        _rc, _ic, _rcc = initial_review_cursor(
+            config, state["repo"], pr_number_from_url(str(pr_url))
+        )
         updates = {
             "status": "pr_opened",
             "pr_url": pr_url,
+            "pr_review_cursor": _rc,
+            "pr_issue_comment_cursor": _ic,
+            "pr_review_comment_cursor": _rcc,
             "worker_id": None,
             "error": None,
         }
@@ -401,6 +433,9 @@ def _persist_state(
         quality_review=state.get("quality_review"),
         quality_review_feedback=state.get("quality_review_feedback"),
         pr_url=state.get("pr_url"),
+        pr_review_cursor=state.get("pr_review_cursor"),
+        pr_issue_comment_cursor=state.get("pr_issue_comment_cursor"),
+        pr_review_comment_cursor=state.get("pr_review_comment_cursor"),
     )
     store.upsert(str(state["repo"]), issue_state)
     return issue_state

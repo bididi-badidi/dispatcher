@@ -46,6 +46,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         store = StateStore(config.paths.state_file)
 
+    _log_tracking_summary(config, store)
     try:
         if config.once:
             run_once(config, store)
@@ -106,3 +107,13 @@ def _repos_for_polling(config: Config, store: StateBackend) -> list[str]:
     if config.repo:
         return [config.repo]
     return []
+
+
+def _log_tracking_summary(config: Config, store: StateBackend) -> None:
+    try:
+        repo_count = len(_repos_for_polling(config, store))
+    except Exception:
+        print("tracking unknown repo(s)")
+        return
+
+    print(f"tracking {repo_count} repo(s)")

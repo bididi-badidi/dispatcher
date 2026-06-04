@@ -55,15 +55,17 @@ never be committed; rotate them and add them to `.env`, which is gitignored.
 
 ## Branching Strategy
 
-Use short-lived feature branches and open pull requests directly to `main`:
+Feature branches merge into `dev`; only `dev` is allowed to merge into `main`.
 
 ```text
-feature/* -> main
+feat/*, fix/*, chore/*, ci/* -> dev
+dev                           -> main
 ```
 
-- Open feature, fix, chore, and CI branches against `main`.
+- Open feature, fix, chore, and CI branches against `dev`.
+- Open `dev` to `main` pull requests to cut a release.
 - Use conventional commit style for commit messages and pull request titles,
-  for example `ci: add pull request checks`.
+  for example `ci: add branch policy check`.
 
 ## GitHub Issue Template
 
@@ -80,6 +82,23 @@ the first green CI run is available.
 For `main`:
 
 - Require a pull request before merging.
-- Require status checks for `lint / python 3.11` and `test / python 3.11`.
+- Required status checks:
+  - `branch-policy`
+  - `lint / python 3.11`
+  - `test / python 3.11`
 - Dismiss stale reviews when new commits are pushed.
 - Restrict direct pushes for non-admin users.
+
+For `dev`:
+
+- Require a pull request before merging.
+- Required status checks:
+  - `lint / python 3.11`
+  - `test / python 3.11`
+
+### Hotfix Exception
+
+If a hotfix must bypass the `dev` to `main` flow, a maintainer can temporarily
+relax the required `branch-policy` check in `main` protection, merge the hotfix
+pull request, then re-enable the check. Record the reason in the hotfix pull
+request description.

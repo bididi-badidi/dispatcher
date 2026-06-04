@@ -6,10 +6,16 @@ import logging
 import signal
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 
-from dispatcher.github import list_triggered_issues
+from dispatcher.cleanup import cleanup_merged_branch
+from dispatcher.github import (
+    list_terminal_prs,
+    list_prs_needing_review_response,
+    list_triggered_issues,
+)
 from dispatcher.langgraph_pipeline import async_run_langgraph_pipeline
-from dispatcher.models import Config, Issue
+from dispatcher.models import Config, Issue, IssueState
 from dispatcher.repo_context import config_for_repo
 from dispatcher.state_backend import StateBackend
 from dispatcher.time_utils import utc_now
@@ -62,11 +68,7 @@ class Dispatcher:
 
     async def run(self) -> None:
         self._install_signal_handlers()
-        print(
-            f"Polling for label {self.config.label!r} every "
-            f"{self.config.poll_interval_seconds:g} seconds with "
-            f"{self.max_workers} worker(s). Press Ctrl-C to stop."
-        )
+        print(self._startup_message())
         poller = asyncio.create_task(self._poller())
         workers = [
             asyncio.create_task(self._worker(worker_id))
@@ -86,6 +88,8 @@ class Dispatcher:
             try:
                 for repo in self._get_repos():
                     await self._enqueue_triggered_issues(repo)
+                    await self._cleanup_merged_issues(repo)
+                    await self._enqueue_review_responses(repo)
             except Exception as exc:
                 print(f"Polling cycle failed: {exc}", file=sys.stderr)
 
@@ -105,6 +109,66 @@ class Dispatcher:
                 continue
             task = Task(repo, issue)
             await self._enqueue_task(task)
+
+    async def _enqueue_review_responses(self, repo: str) -> None:
+        repo_config = config_for_repo(self.config, repo)
+        pending = await asyncio.to_thread(
+            list_prs_needing_review_response, repo_config, repo, self.store
+        )
+        for issue, feedback, new_cursors in pending:
+            if (repo, issue.number) in self._in_flight:
+                continue
+
+            existing = self.store.get(repo, issue.number)
+            if not existing:
+                continue
+
+            state = IssueState(**existing)
+            state.pr_review_cursor = new_cursors[0]
+            state.pr_issue_comment_cursor = new_cursors[1]
+            state.pr_review_comment_cursor = new_cursors[2]
+            state.status = "pr_review_queued"
+            state.build_iteration = 0
+            state.build_feedback = feedback
+            state.updated_at = utc_now()
+            self.store.upsert(repo, state)
+            await self._enqueue_task(Task(repo, issue, TaskType.REVIEW))
+
+    async def _cleanup_merged_issues(self, repo: str) -> None:
+        repo_config = config_for_repo(self.config, repo)
+        terminal_prs = await asyncio.to_thread(
+            list_terminal_prs, repo_config, repo, self.store
+        )
+        for terminal_pr in terminal_prs:
+            issue = terminal_pr.issue
+            if (repo, issue.number) in self._in_flight:
+                continue
+
+            existing = self.store.get(repo, issue.number)
+            if not existing:
+                continue
+
+            state = IssueState(**existing)
+            state.status = terminal_pr.status
+            state.updated_at = utc_now()
+            self.store.upsert(repo, state)
+
+            try:
+                await asyncio.to_thread(
+                    cleanup_merged_branch,
+                    state.branch,
+                    Path(state.worktree),
+                    repo_config.paths.project_dir,
+                )
+                state.status = "cleaned_up"
+            except Exception as exc:
+                print(
+                    f"warn: cleanup failed for issue #{issue.number}: {exc}",
+                    file=sys.stderr,
+                )
+            finally:
+                state.updated_at = utc_now()
+                self.store.upsert(repo, state)
 
     async def _worker(self, worker_id: int) -> None:
         while True:
@@ -223,6 +287,13 @@ class Dispatcher:
         if self.config.repo:
             return [self.config.repo]
         return []
+
+    def _startup_message(self) -> str:
+        return (
+            f"Polling for label {self.config.label!r} every "
+            f"{self.config.poll_interval_seconds:g} seconds with "
+            f"{self.max_workers} worker(s). Press Ctrl-C to stop."
+        )
 
     def _require_single_repo(self) -> str:
         if self.config.repo is None:
