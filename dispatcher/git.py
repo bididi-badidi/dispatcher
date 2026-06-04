@@ -68,16 +68,28 @@ def require_worktree_path(worktree: Path) -> None:
 
 def branch_exists(branch: str, cwd: Path | None = None) -> bool:
     """Return True when a branch exists locally or on origin."""
+    if cwd is not None and not cwd.exists():
+        return False
+
     run_kwargs = {"capture_output": True, "cwd": cwd, "text": True}
 
-    local = subprocess.run(["git", "branch", "--list", branch], **run_kwargs)
-    if local.stdout.strip():
-        return True
+    for ref in (f"refs/heads/{branch}", f"refs/remotes/origin/{branch}"):
+        result = _run_git(["git", "show-ref", "--verify", "--quiet", ref], run_kwargs)
+        if result.returncode == 0:
+            return True
 
-    remote = subprocess.run(
-        ["git", "ls-remote", "--heads", "origin", branch], **run_kwargs
-    )
+    remote = _run_git(["git", "ls-remote", "--heads", "origin", branch], run_kwargs)
     return bool(remote.stdout.strip())
+
+
+def _run_git(
+    command: list[str],
+    run_kwargs: dict[str, object],
+) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(command, **run_kwargs)
+    except FileNotFoundError:
+        return subprocess.CompletedProcess(command, returncode=1, stdout="", stderr="")
 
 
 def repo_name_from_full_name(repo: str) -> str:

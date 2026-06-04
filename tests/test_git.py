@@ -1,0 +1,60 @@
+from __future__ import annotations
+
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from dispatcher.git import branch_exists
+
+
+class GitTests(unittest.TestCase):
+    def test_branch_exists_accepts_remote_tracking_ref(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cwd = Path(temp_dir)
+            local_missing = subprocess.CompletedProcess(args=[], returncode=1)
+            remote_tracking_exists = subprocess.CompletedProcess(args=[], returncode=0)
+
+            with patch(
+                "dispatcher.git.subprocess.run",
+                side_effect=[local_missing, remote_tracking_exists],
+            ) as run:
+                exists = branch_exists("main", cwd=cwd)
+
+            self.assertTrue(exists)
+            self.assertEqual(run.call_count, 2)
+            run.assert_any_call(
+                ["git", "show-ref", "--verify", "--quiet", "refs/heads/main"],
+                capture_output=True,
+                cwd=cwd,
+                text=True,
+            )
+            run.assert_any_call(
+                ["git", "show-ref", "--verify", "--quiet", "refs/remotes/origin/main"],
+                capture_output=True,
+                cwd=cwd,
+                text=True,
+            )
+
+    def test_branch_exists_falls_back_to_origin_lookup(self) -> None:
+        missing_ref = subprocess.CompletedProcess(args=[], returncode=1)
+        origin_has_branch = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="abc123\trefs/heads/dev\n",
+            stderr="",
+        )
+
+        with patch(
+            "dispatcher.git.subprocess.run",
+            side_effect=[missing_ref, missing_ref, origin_has_branch],
+        ):
+            self.assertTrue(branch_exists("dev"))
+
+    def test_branch_exists_returns_false_for_missing_cwd(self) -> None:
+        with patch("dispatcher.git.subprocess.run") as run:
+            exists = branch_exists("main", cwd=Path("/missing/repo"))
+
+        self.assertFalse(exists)
+        run.assert_not_called()

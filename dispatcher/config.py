@@ -31,6 +31,7 @@ from dispatcher.prompts import (
 )
 
 ENV_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_WARNED_BASE_BRANCH_FALLBACKS: set[tuple[str | None, str, Path, Path, Path]] = set()
 
 
 def positive_float(value: str) -> float:
@@ -108,21 +109,105 @@ def _strip_inline_comment(value: str) -> str:
     return value
 
 
-def resolve_base_branch(branch: str, cwd: Path | None = None) -> str:
-    if branch_exists(branch, cwd):
+def resolve_base_branch(
+    branch: str,
+    *,
+    repo: str | None,
+    project_dir: Path,
+    fallback_project_dir: Path,
+    worktree_root: Path,
+    dispatcher_dir: Path,
+) -> str:
+    cwd = _branch_check_cwd(
+        requested_project_dir=project_dir,
+        fallback_project_dir=fallback_project_dir,
+        dispatcher_dir=dispatcher_dir,
+    )
+    project_dir_exists = checkout_exists(project_dir)
+    fallback_project_dir_exists = checkout_exists(fallback_project_dir)
+    if project_dir_exists and branch_exists(branch, project_dir):
         return branch
 
-    warnings.warn(
-        f"Branch '{branch}' not found locally or remotely; "
-        f"falling back to '{DEFAULT_BASE_BRANCH}'.",
-        stacklevel=3,
+    context = _base_branch_context(
+        repo=repo,
+        branch=branch,
+        cwd=cwd,
+        project_dir=project_dir,
+        project_dir_exists=project_dir_exists,
+        fallback_project_dir=fallback_project_dir,
+        fallback_project_dir_exists=fallback_project_dir_exists,
+        worktree_root=worktree_root,
     )
-    if branch_exists(DEFAULT_BASE_BRANCH, cwd):
+    if branch == DEFAULT_BASE_BRANCH:
+        raise SystemExit(
+            f"error: branch '{DEFAULT_BASE_BRANCH}' is not available as a usable "
+            "checkout.\n"
+            f"{context}"
+        )
+
+    warn_base_branch_fallback_once(
+        repo=repo,
+        branch=branch,
+        project_dir=project_dir,
+        fallback_project_dir=fallback_project_dir,
+        worktree_root=worktree_root,
+        context=context,
+    )
+    if fallback_project_dir_exists and branch_exists(
+        DEFAULT_BASE_BRANCH, fallback_project_dir
+    ):
         return DEFAULT_BASE_BRANCH
 
     raise SystemExit(
-        f"error: branch '{branch}' not found and fallback "
-        f"'{DEFAULT_BASE_BRANCH}' does not exist either"
+        f"error: branch '{branch}' is not available as a usable checkout and "
+        f"fallback '{DEFAULT_BASE_BRANCH}' is not available either.\n{context}"
+    )
+
+
+def warn_base_branch_fallback_once(
+    *,
+    repo: str | None,
+    branch: str,
+    project_dir: Path,
+    fallback_project_dir: Path,
+    worktree_root: Path,
+    context: str,
+) -> None:
+    key = (repo, branch, project_dir, fallback_project_dir, worktree_root)
+    if key in _WARNED_BASE_BRANCH_FALLBACKS:
+        return
+
+    _WARNED_BASE_BRANCH_FALLBACKS.add(key)
+    warnings.warn(
+        f"Branch '{branch}' unavailable for {repo or '<redis-discovered>'}; "
+        f"using '{DEFAULT_BASE_BRANCH}' "
+        f"(missing checkout: {project_dir}).",
+        stacklevel=4,
+    )
+
+
+def _base_branch_context(
+    *,
+    repo: str | None,
+    branch: str,
+    cwd: Path,
+    project_dir: Path,
+    project_dir_exists: bool,
+    fallback_project_dir: Path,
+    fallback_project_dir_exists: bool,
+    worktree_root: Path,
+) -> str:
+    return (
+        "Branch check context: "
+        f"repo={repo or '<redis-discovered>'}, "
+        f"requested_branch={branch}, "
+        f"fallback_branch={DEFAULT_BASE_BRANCH}, "
+        f"check_cwd={cwd}, "
+        f"project_dir={project_dir}, "
+        f"project_dir_exists={project_dir_exists}, "
+        f"fallback_project_dir={fallback_project_dir}, "
+        f"fallback_project_dir_exists={fallback_project_dir_exists}, "
+        f"worktree_root={worktree_root}"
     )
 
 
@@ -211,7 +296,6 @@ def build_config(argv: Sequence[str] | None = None) -> Config:
     args = parser.parse_args(argv)
 
     dispatcher_dir = resolve_root_dir()
-    args.base_branch = resolve_base_branch(args.base_branch, cwd=dispatcher_dir)
     repo = os.getenv("DISPATCHER_REPO")
     redis_url = os.getenv("DISPATCHER_REDIS_URL")
     opus_label = os.getenv("DISPATCHER_OPUS_LABEL", DEFAULT_OPUS_LABEL)
@@ -231,6 +315,21 @@ def build_config(argv: Sequence[str] | None = None) -> Config:
     worktree_root = (
         args.worktree_root or default_worktree_root(repo_name, projects_dir)
     ).resolve()
+    requested_project_dir = (
+        args.project_dir or worktree_root / args.base_branch
+    ).resolve()
+    fallback_project_dir = (
+        args.project_dir or worktree_root / DEFAULT_BASE_BRANCH
+    ).resolve()
+    if repo is not None:
+        args.base_branch = resolve_base_branch(
+            args.base_branch,
+            repo=repo,
+            project_dir=requested_project_dir,
+            fallback_project_dir=fallback_project_dir,
+            worktree_root=worktree_root,
+            dispatcher_dir=dispatcher_dir,
+        )
     project_dir = (args.project_dir or worktree_root / args.base_branch).resolve()
     state_file = (
         args.state_file
@@ -272,6 +371,23 @@ def build_config(argv: Sequence[str] | None = None) -> Config:
     )
     validate_config(config)
     return config
+
+
+def _branch_check_cwd(
+    *,
+    requested_project_dir: Path,
+    fallback_project_dir: Path,
+    dispatcher_dir: Path,
+) -> Path:
+    if checkout_exists(requested_project_dir):
+        return requested_project_dir
+    if checkout_exists(fallback_project_dir):
+        return fallback_project_dir
+    return dispatcher_dir
+
+
+def checkout_exists(path: Path) -> bool:
+    return path.exists()
 
 
 def validate_config(config: Config) -> None:
