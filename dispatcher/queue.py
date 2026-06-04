@@ -5,14 +5,21 @@ import enum
 import logging
 import signal
 from dataclasses import dataclass
+from pathlib import Path
 
-from dispatcher.github import list_triggered_issues
+from dispatcher.cleanup import cleanup_merged_branch
+from dispatcher.github import (
+    list_terminal_prs,
+    list_prs_needing_review_response,
+    list_triggered_issues,
+)
 from dispatcher.langgraph_pipeline import async_run_langgraph_pipeline
-from dispatcher.models import Config, Issue
+from dispatcher.models import Config, Issue, IssueState
 from dispatcher.repo_context import config_for_repo
 from dispatcher.state_backend import StateBackend
+from dispatcher.time_utils import utc_now
 
-LOGGER = logging.getLogger("dispatcher.queue")
+LOGGER = logging.getLogger(__name__)
 
 
 class TaskType(enum.Enum):
@@ -60,13 +67,7 @@ class Dispatcher:
 
     async def run(self) -> None:
         self._install_signal_handlers()
-        LOGGER.info(
-            "Polling for label %r every %g seconds with %d worker(s). "
-            "Press Ctrl-C to stop.",
-            self.config.label,
-            self.config.poll_interval_seconds,
-            self.max_workers,
-        )
+        LOGGER.info(self._startup_message())
         poller = asyncio.create_task(self._poller())
         workers = [
             asyncio.create_task(self._worker(worker_id))
@@ -86,8 +87,10 @@ class Dispatcher:
             try:
                 for repo in self._get_repos():
                     await self._enqueue_triggered_issues(repo)
+                    await self._cleanup_merged_issues(repo)
+                    await self._enqueue_review_responses(repo)
             except Exception as exc:
-                LOGGER.error("Polling cycle failed: %s", exc)
+                LOGGER.exception("Polling cycle failed: %s", exc)
 
             try:
                 await asyncio.wait_for(
@@ -105,6 +108,67 @@ class Dispatcher:
                 continue
             task = Task(repo, issue)
             await self._enqueue_task(task)
+
+    async def _enqueue_review_responses(self, repo: str) -> None:
+        repo_config = config_for_repo(self.config, repo)
+        pending = await asyncio.to_thread(
+            list_prs_needing_review_response, repo_config, repo, self.store
+        )
+        for issue, feedback, new_cursors in pending:
+            if (repo, issue.number) in self._in_flight:
+                continue
+
+            existing = self.store.get(repo, issue.number)
+            if not existing:
+                continue
+
+            state = IssueState(**existing)
+            state.pr_review_cursor = new_cursors[0]
+            state.pr_issue_comment_cursor = new_cursors[1]
+            state.pr_review_comment_cursor = new_cursors[2]
+            state.status = "pr_review_queued"
+            state.build_iteration = 0
+            state.build_feedback = feedback
+            state.updated_at = utc_now()
+            self.store.upsert(repo, state)
+            await self._enqueue_task(Task(repo, issue, TaskType.REVIEW))
+
+    async def _cleanup_merged_issues(self, repo: str) -> None:
+        repo_config = config_for_repo(self.config, repo)
+        terminal_prs = await asyncio.to_thread(
+            list_terminal_prs, repo_config, repo, self.store
+        )
+        for terminal_pr in terminal_prs:
+            issue = terminal_pr.issue
+            if (repo, issue.number) in self._in_flight:
+                continue
+
+            existing = self.store.get(repo, issue.number)
+            if not existing:
+                continue
+
+            state = IssueState(**existing)
+            state.status = terminal_pr.status
+            state.updated_at = utc_now()
+            self.store.upsert(repo, state)
+
+            try:
+                await asyncio.to_thread(
+                    cleanup_merged_branch,
+                    state.branch,
+                    Path(state.worktree),
+                    repo_config.paths.project_dir,
+                )
+                state.status = "cleaned_up"
+            except Exception as exc:
+                LOGGER.warning(
+                    "cleanup failed for issue #%d: %s",
+                    issue.number,
+                    exc,
+                )
+            finally:
+                state.updated_at = utc_now()
+                self.store.upsert(repo, state)
 
     async def _worker(self, worker_id: int) -> None:
         while True:
@@ -148,6 +212,7 @@ class Dispatcher:
         except asyncio.QueueFull:
             self._in_flight.discard((task.repo, task.issue.number))
             return False
+        self._log_enqueued(task)
         return True
 
     def snapshot(self) -> QueueSnapshot:
@@ -180,6 +245,14 @@ class Dispatcher:
     def _mark_queued(self, task: Task) -> None:
         self._in_flight.add((task.repo, task.issue.number))
 
+    def _log_enqueued(self, task: Task) -> None:
+        task_id = f"{task.repo}#{task.issue.number}:{task.task_type.value}"
+        LOGGER.info(
+            f"[INFO] task queued | id={task_id} repo={task.repo} issue={task.issue.number}"
+            f" type={task.task_type.value} queued_at={utc_now()}"
+            f" queue_depth={self._queue.qsize()}"
+        )
+
     async def _enqueue_task(self, task: Task) -> bool:
         self._mark_queued(task)
         while not self._shutdown.is_set():
@@ -188,6 +261,7 @@ class Dispatcher:
                     self._queue.put(task),
                     timeout=self._QUEUE_PUT_TIMEOUT_SECONDS,
                 )
+                self._log_enqueued(task)
                 return True
             except TimeoutError:
                 pass
@@ -208,6 +282,13 @@ class Dispatcher:
         if self.config.repo:
             return [self.config.repo]
         return []
+
+    def _startup_message(self) -> str:
+        return (
+            f"Polling for label {self.config.label!r} every "
+            f"{self.config.poll_interval_seconds:g} seconds with "
+            f"{self.max_workers} worker(s). Press Ctrl-C to stop."
+        )
 
     def _require_single_repo(self) -> str:
         if self.config.repo is None:

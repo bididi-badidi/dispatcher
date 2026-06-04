@@ -26,7 +26,7 @@ class FakeRunner(AgentRunner):
     def stdin(self, prompt: str) -> str:
         return prompt
 
-    def version(self) -> str:
+    def version(self, *, debug: bool = False) -> str:
         return "fake 1.0"
 
 
@@ -51,6 +51,24 @@ class FailingProcess:
 
     async def communicate(self, input: bytes | None = None) -> tuple[bytes, bytes]:
         raise RuntimeError("communicate exploded")
+
+
+class StringFailingProcess:
+    returncode = 1
+    stdout = "partial snowman \u2603"
+    stderr = "partial error \u2603"
+
+    async def communicate(self, input: bytes | None = None) -> tuple[bytes, bytes]:
+        raise RuntimeError("unicode communicate exploded")
+
+
+class CancelledProcess:
+    returncode = 1
+    stdout = b"partial out"
+    stderr = b"partial err"
+
+    async def communicate(self, input: bytes | None = None) -> tuple[bytes, bytes]:
+        raise asyncio.CancelledError()
 
 
 class AsyncRunnerTests(unittest.TestCase):
@@ -89,6 +107,61 @@ class AsyncRunnerTests(unittest.TestCase):
                 log_text = log_path.read_text(encoding="utf-8")
                 self.assertIn("[stdout]\ndone", log_text)
                 self.assertIn("[stderr]\nwarn", log_text)
+
+        asyncio.run(scenario())
+
+    def test_async_stage_encodes_string_capture_safely_on_error(self) -> None:
+        async def scenario() -> None:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                worktree = Path(temp_dir)
+                config = make_config(worktree, dry_run=False)
+                runner = FakeRunner("hello")
+
+                with patch(
+                    "dispatcher.async_runners.asyncio.create_subprocess_exec",
+                    return_value=StringFailingProcess(),
+                ):
+                    with self.assertRaisesRegex(
+                        RuntimeError, "unicode communicate exploded"
+                    ):
+                        await async_run_stage(
+                            "plan",
+                            runner,
+                            Issue(11, "Crash", "https://example.test/11"),
+                            config,
+                            worktree,
+                            "feat/issue-11",
+                        )
+
+                log_path = (
+                    config.paths.log_dir / "example" / "repo" / "issue-11-plan.log"
+                )
+                log_text = log_path.read_text(encoding="utf-8")
+                self.assertIn("[stdout]\npartial snowman", log_text)
+                self.assertIn("[stderr]\npartial error", log_text)
+
+        asyncio.run(scenario())
+
+    def test_async_stage_propagates_cancellation_from_communicate(self) -> None:
+        async def scenario() -> None:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                worktree = Path(temp_dir)
+                config = make_config(worktree, dry_run=False)
+                runner = FakeRunner("hello")
+
+                with patch(
+                    "dispatcher.async_runners.asyncio.create_subprocess_exec",
+                    return_value=CancelledProcess(),
+                ):
+                    with self.assertRaises(asyncio.CancelledError):
+                        await async_run_stage(
+                            "plan",
+                            runner,
+                            Issue(12, "Cancel", "https://example.test/12"),
+                            config,
+                            worktree,
+                            "feat/issue-12",
+                        )
 
         asyncio.run(scenario())
 

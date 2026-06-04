@@ -46,6 +46,7 @@ class Config:
     max_workers: int = 3
     s3_log_bucket: str | None = None
     s3_log_key_prefix: str = ""
+    debug: bool = False
 
     @property
     def session_log_local_dir(self) -> Path:
@@ -71,3 +72,6 @@ class IssueState:
     quality_review: str | None = None
     quality_review_feedback: str | None = None
     pr_url: str | None = None
+    pr_review_cursor: int | None = None
+    pr_issue_comment_cursor: int | None = None
+    pr_review_comment_cursor: int | None = None

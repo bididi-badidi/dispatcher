@@ -1,25 +1,24 @@
-"""Operator-facing subprocess command echoes.
-
-The dispatcher workflow uses structured logging. This helper intentionally
-keeps a direct stdout echo so humans can see the exact external command being
-launched in CLI sessions.
-"""
+"""Operator-facing subprocess command logging."""
 
 from __future__ import annotations
 
 import json
+import logging
 import shlex
 import subprocess
 from pathlib import Path
 from typing import Any, Sequence
 
-
-def print_subprocess_command(command: Sequence[str]) -> None:
-    print(f"$ {shlex.join(command)}")
+LOGGER = logging.getLogger("dispatcher.subprocess")
 
 
-def run_json(command: Sequence[str], cwd: Path) -> Any:
-    print_subprocess_command(command)
+def print_subprocess_command(command: Sequence[str], *, debug: bool = False) -> None:
+    if debug:
+        LOGGER.info("$ %s", shlex.join(command))
+
+
+def run_json(command: Sequence[str], cwd: Path, *, debug: bool = False) -> Any:
+    print_subprocess_command(command, debug=debug)
     completed = subprocess.run(
         command,
         cwd=cwd,

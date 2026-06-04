@@ -32,7 +32,7 @@ async def async_run_stage(
     repo_log_dir = config.paths.log_dir / config.repo
     repo_log_dir.mkdir(parents=True, exist_ok=True)
     log_path = repo_log_dir / f"issue-{issue.number}-{runner.stage_name}.log"
-    version = await asyncio.to_thread(runner.version)
+    version = await asyncio.to_thread(runner.version, debug=config.debug)
     command_text = shlex.join(command)
     stdin_text = runner.stdin(prompt)
     stdin_log = f"\n\n[stdin]\n{stdin_text}" if stdin_text is not None else ""
@@ -45,7 +45,7 @@ async def async_run_stage(
         _submit_stage_upload(config, issue.number, runner.stage_name, log_path)
         return ""
 
-    print_subprocess_command(command)
+    print_subprocess_command(command, debug=config.debug)
     proc = await asyncio.create_subprocess_exec(
         *command,
         cwd=cwd,
@@ -57,12 +57,12 @@ async def async_run_stage(
     encoding = locale.getpreferredencoding(False)
     stdout = b""
     stderr = b""
-    communicate_error: BaseException | None = None
+    communicate_error: Exception | None = None
     try:
         stdout, stderr = await proc.communicate(
             input=stdin_text.encode(encoding) if stdin_text is not None else None
         )
-    except BaseException as exc:
+    except Exception as exc:
         communicate_error = exc
         stdout = _captured_bytes(proc, "stdout", stdout)
         stderr = _captured_bytes(proc, "stderr", stderr)
@@ -118,5 +118,5 @@ def _captured_bytes(proc: object, attr_name: str, default: bytes) -> bytes:
     if isinstance(value, bytes):
         return value
     if isinstance(value, str):
-        return value.encode()
+        return value.encode("utf-8", errors="replace")
     return default

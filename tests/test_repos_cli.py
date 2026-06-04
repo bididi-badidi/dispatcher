@@ -98,13 +98,16 @@ class _PatchedEnv:
         self._temp_dir = temp_dir
         self._cwd_patch = patch("pathlib.Path.cwd", return_value=dispatcher_dir)
         self._env_patch = patch.dict("os.environ", env, clear=True)
+        self._branch_patch = patch("dispatcher.config.branch_exists", return_value=True)
 
     def __enter__(self) -> None:
         self._temp_dir.__enter__()
         self._cwd_patch.__enter__()
         self._env_patch.__enter__()
+        self._branch_patch.__enter__()
 
     def __exit__(self, *args: object) -> None:
+        self._branch_patch.__exit__(*args)
         self._env_patch.__exit__(*args)
         self._cwd_patch.__exit__(*args)
         self._temp_dir.__exit__(*args)

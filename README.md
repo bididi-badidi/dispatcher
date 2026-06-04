@@ -45,14 +45,15 @@ project.
 
 ## Usage
 
+Simple polling loop — processes newly labelled issues one at a time:
+
 ```bash
 DISPATCHER_REPO=OWNER/REPO uv run python main.py
 ```
 
 On startup, the dispatcher loads environment defaults from a `.env` file in the
-current dispatcher directory. Variables that are already exported in the shell
-take precedence over `.env` values. Start from `.env.example` when creating a
-local `.env` file.
+current dispatcher directory. Shell exports take precedence. Start from
+`.env.example` when creating a local `.env` file.
 
 Useful options:
 
@@ -107,8 +108,8 @@ repository's issue `#7`. Logs default to `.dispatcher/logs/` and use matching
 repository subdirectories.
 
 By default the process keeps running and polls every 120 seconds. A failed
-polling cycle is printed to stderr, then the dispatcher waits for the next
-interval and tries again. Press Ctrl-C to stop the process.
+polling cycle is logged with its traceback, then the dispatcher waits for the
+next interval and tries again. Press Ctrl-C to stop the process.
 
 Daemon mode keeps the same polling source and stage runners, but enqueues
 unseen issues into an `asyncio` worker pool so multiple issue pipelines can run
@@ -117,39 +118,22 @@ worktree creation, planning, build, parallel plan/code-quality reviews,
 conditional build retry, and PR opening.
 
 ```bash
-DISPATCHER_REPO=OWNER/REPO uv run python main.py --daemon --max-workers 3
+DISPATCHER_REPO=OWNER/REPO uv run python main.py --daemon
 ```
 
-Redis-backed daemon mode polls every repository currently registered in Redis:
+Redis-backed daemon — polls all registered repositories:
 
 ```bash
-DISPATCHER_REDIS_URL=redis://localhost:6379/0 uv run dispatcher-repos add OWNER/REPO
-DISPATCHER_REDIS_URL=redis://localhost:6379/0 uv run dispatcher-repos list
 DISPATCHER_REDIS_URL=redis://localhost:6379/0 uv run python main.py --daemon
 ```
 
-Use `dispatcher-repos add` before starting Redis-backed polling. The command is
-the supported way to populate the dispatcher's tracked repository set without
-calling `redis-cli SADD` directly. To stop polling a repository, run:
+Use `--debug` or `DISPATCHER_DEBUG=1` to log subprocess commands.
 
-```bash
-DISPATCHER_REDIS_URL=redis://localhost:6379/0 uv run dispatcher-repos remove OWNER/REPO
-```
+See [docs/cli-reference.md](docs/cli-reference.md) for all flags and
+environment variables.
 
-Issue state is terminal once a record exists, including `failed` records. The
-poller will not automatically retry failed issues. When using the local JSON
-fallback, clear or edit the relevant entry in `.dispatcher/state.json` before
-reprocessing an issue. When using Redis-backed state, delete the matching
-`dispatcher:state:{owner/repo}:{issue_number}` key instead, for example:
-
-```bash
-redis-cli DEL 'dispatcher:state:OWNER/REPO:123'
-```
-
-Issues with both the main trigger label, `automate` by default, and the
-secondary `automate:opus` label run the planning stage with
-`claude-opus-4-7`. Worktree creation and build stages keep their normal
-provider defaults.
+See [docs/scripts.md](docs/scripts.md) for common operational scripts
+(repository registration, state inspection, clearing failed records).
 
 ## Stage Prompts
 
@@ -184,6 +168,10 @@ The dispatcher rejects yolo or dangerous skip/bypass flags before launching any
 agent subprocess.
 
 ## Development
+
+Branching policy: feature branches merge into `dev`; only `dev` merges into
+`main`. This is enforced by the `branch-policy` workflow. See
+[CONTRIBUTING.md](CONTRIBUTING.md#branching-strategy).
 
 ```bash
 uv run ruff format .

@@ -21,7 +21,7 @@ from tests.helpers import make_config
 
 
 class RunnerTests(unittest.TestCase):
-    def test_agent_runner_prints_version_and_launch_commands_to_stdout(self) -> None:
+    def test_agent_runner_is_silent_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             worktree = Path(temp_dir)
             (worktree / ".git").mkdir()
@@ -35,7 +35,35 @@ class RunnerTests(unittest.TestCase):
             )
 
             with (
-                patch("builtins.print") as print_,
+                patch("dispatcher.subprocess_utils.LOGGER.info") as log_info,
+                patch("dispatcher.runners.subprocess.run", side_effect=[version, run]),
+            ):
+                runner.run(
+                    Issue(2, "Build", "https://example.test/2"),
+                    config,
+                    worktree,
+                    "feat/issue-2",
+                )
+
+            log_info.assert_not_called()
+
+    def test_agent_runner_prints_version_and_launch_commands_when_debug_true(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            worktree = Path(temp_dir)
+            (worktree / ".git").mkdir()
+            config = replace(make_config(worktree, dry_run=False), debug=True)
+            runner = CodexRunner("build $issue_number")
+            version = subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="codex-cli 1.0", stderr=""
+            )
+            run = subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="", stderr=""
+            )
+
+            with (
+                self.assertLogs("dispatcher.subprocess", level="INFO") as logs,
                 patch("dispatcher.runners.subprocess.run", side_effect=[version, run]),
             ):
                 runner.run(
@@ -46,7 +74,7 @@ class RunnerTests(unittest.TestCase):
                 )
 
             self.assertEqual(
-                [call.args[0] for call in print_.call_args_list],
+                [record.getMessage() for record in logs.records],
                 [
                     "$ codex --version",
                     "$ codex exec --sandbox workspace-write --config "
