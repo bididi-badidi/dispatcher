@@ -4,6 +4,7 @@ import argparse
 import os
 import re
 import warnings
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
@@ -18,9 +19,10 @@ from dispatcher.constants import (
     DEFAULT_STATE_FILE,
 )
 from dispatcher.git import (
-    branch_exists,
+    BranchLookup,
     default_projects_dir,
     default_worktree_root,
+    lookup_branch,
     repo_name_from_full_name,
 )
 from dispatcher.models import Commands, Config, Paths
@@ -31,7 +33,17 @@ from dispatcher.prompts import (
 )
 
 ENV_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-_WARNED_BASE_BRANCH_FALLBACKS: set[tuple[str | None, str, Path, Path, Path]] = set()
+_WARNED_BASE_BRANCH_FALLBACKS: set[tuple[str | None, str, str, Path, Path, Path]] = (
+    set()
+)
+
+
+@dataclass(frozen=True)
+class BaseBranchResolution:
+    branch: str
+    project_dir: Path
+    fell_back: bool
+    cause: str | None = None
 
 
 def positive_float(value: str) -> float:
@@ -117,47 +129,64 @@ def resolve_base_branch(
     fallback_project_dir: Path,
     worktree_root: Path,
     dispatcher_dir: Path,
-) -> str:
-    cwd = _branch_check_cwd(
+) -> BaseBranchResolution:
+    cwd = select_branch_check_cwd(
         requested_project_dir=project_dir,
         fallback_project_dir=fallback_project_dir,
+        worktree_root=worktree_root,
         dispatcher_dir=dispatcher_dir,
     )
-    project_dir_exists = checkout_exists(project_dir)
-    fallback_project_dir_exists = checkout_exists(fallback_project_dir)
-    if project_dir_exists and branch_exists(branch, project_dir):
-        return branch
-
+    result = lookup_branch(branch, cwd=cwd)
     context = _base_branch_context(
         repo=repo,
         branch=branch,
         cwd=cwd,
         project_dir=project_dir,
-        project_dir_exists=project_dir_exists,
+        project_dir_exists=checkout_exists(project_dir),
         fallback_project_dir=fallback_project_dir,
-        fallback_project_dir_exists=fallback_project_dir_exists,
+        fallback_project_dir_exists=checkout_exists(fallback_project_dir),
         worktree_root=worktree_root,
     )
+    if result is BranchLookup.PRESENT:
+        return BaseBranchResolution(
+            branch=branch,
+            project_dir=select_project_dir(
+                resolved_branch=branch,
+                worktree_root=worktree_root,
+                fallback_project_dir=fallback_project_dir,
+            ),
+            fell_back=False,
+        )
+
     if branch == DEFAULT_BASE_BRANCH:
         raise SystemExit(
-            f"error: branch '{DEFAULT_BASE_BRANCH}' is not available as a usable "
-            "checkout.\n"
+            f"error: branch '{DEFAULT_BASE_BRANCH}' is not available on origin.\n"
             f"{context}"
         )
 
-    if fallback_project_dir_exists and branch_exists(
-        DEFAULT_BASE_BRANCH, fallback_project_dir
-    ):
+    fallback_result = lookup_branch(DEFAULT_BASE_BRANCH, cwd=cwd)
+    if fallback_result is BranchLookup.PRESENT:
+        cause = "absent_on_origin" if result is BranchLookup.ABSENT else "lookup_failed"
+        selected_project_dir = select_project_dir(
+            resolved_branch=DEFAULT_BASE_BRANCH,
+            worktree_root=worktree_root,
+            fallback_project_dir=fallback_project_dir,
+        )
         warn_base_branch_fallback_once(
             repo=repo,
             branch=branch,
+            cause=cause,
             project_dir=project_dir,
-            project_dir_exists=project_dir_exists,
             fallback_project_dir=fallback_project_dir,
             worktree_root=worktree_root,
             context=context,
         )
-        return DEFAULT_BASE_BRANCH
+        return BaseBranchResolution(
+            branch=DEFAULT_BASE_BRANCH,
+            project_dir=selected_project_dir,
+            fell_back=True,
+            cause=cause,
+        )
 
     raise SystemExit(
         f"error: branch '{branch}' is not available as a usable checkout and "
@@ -169,22 +198,21 @@ def warn_base_branch_fallback_once(
     *,
     repo: str | None,
     branch: str,
+    cause: str,
     project_dir: Path,
-    project_dir_exists: bool,
     fallback_project_dir: Path,
     worktree_root: Path,
     context: str,
 ) -> None:
-    key = (repo, branch, project_dir, fallback_project_dir, worktree_root)
+    key = (repo, branch, cause, project_dir, fallback_project_dir, worktree_root)
     if key in _WARNED_BASE_BRANCH_FALLBACKS:
         return
 
     _WARNED_BASE_BRANCH_FALLBACKS.add(key)
     warnings.warn(
         f"Branch '{branch}' unavailable for {repo or '<redis-discovered>'}; "
-        f"using '{DEFAULT_BASE_BRANCH}' "
-        f"(checkout/branch unavailable: {project_dir}; "
-        f"checkout_exists={project_dir_exists}).",
+        f"using '{DEFAULT_BASE_BRANCH}' (cause={cause}, "
+        f"project_dir={project_dir}, fallback_project_dir={fallback_project_dir}).",
         stacklevel=4,
     )
 
@@ -193,7 +221,7 @@ def _base_branch_context(
     *,
     repo: str | None,
     branch: str,
-    cwd: Path,
+    cwd: Path | None,
     project_dir: Path,
     project_dir_exists: bool,
     fallback_project_dir: Path,
@@ -324,8 +352,9 @@ def build_config(argv: Sequence[str] | None = None) -> Config:
     fallback_project_dir = (
         args.project_dir or worktree_root / DEFAULT_BASE_BRANCH
     ).resolve()
+    project_dir = requested_project_dir
     if repo is not None:
-        args.base_branch = resolve_base_branch(
+        resolution = resolve_base_branch(
             args.base_branch,
             repo=repo,
             project_dir=requested_project_dir,
@@ -333,7 +362,8 @@ def build_config(argv: Sequence[str] | None = None) -> Config:
             worktree_root=worktree_root,
             dispatcher_dir=dispatcher_dir,
         )
-    project_dir = (args.project_dir or worktree_root / args.base_branch).resolve()
+        args.base_branch = resolution.branch
+        project_dir = resolution.project_dir
     state_file = (
         args.state_file
         if args.state_file.is_absolute()
@@ -376,17 +406,48 @@ def build_config(argv: Sequence[str] | None = None) -> Config:
     return config
 
 
-def _branch_check_cwd(
+def select_branch_check_cwd(
     *,
     requested_project_dir: Path,
     fallback_project_dir: Path,
+    worktree_root: Path,
     dispatcher_dir: Path,
-) -> Path:
-    if checkout_exists(requested_project_dir):
-        return requested_project_dir
+) -> Path | None:
     if checkout_exists(fallback_project_dir):
         return fallback_project_dir
-    return dispatcher_dir
+    if checkout_exists(requested_project_dir):
+        return requested_project_dir
+    for sibling in _existing_siblings(worktree_root):
+        return sibling
+    if _is_git_checkout(dispatcher_dir):
+        return dispatcher_dir
+    return None
+
+
+def select_project_dir(
+    *,
+    resolved_branch: str,
+    worktree_root: Path,
+    fallback_project_dir: Path,
+) -> Path:
+    resolved_project_dir = (worktree_root / resolved_branch).resolve()
+    if checkout_exists(resolved_project_dir):
+        return resolved_project_dir
+    if checkout_exists(fallback_project_dir):
+        return fallback_project_dir.resolve()
+    for sibling in _existing_siblings(worktree_root):
+        return sibling
+    return resolved_project_dir
+
+
+def _existing_siblings(worktree_root: Path) -> list[Path]:
+    if not worktree_root.is_dir():
+        return []
+    return sorted(path.resolve() for path in worktree_root.iterdir() if path.is_dir())
+
+
+def _is_git_checkout(path: Path) -> bool:
+    return checkout_exists(path) and (path / ".git").exists()
 
 
 def checkout_exists(path: Path) -> bool:

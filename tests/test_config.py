@@ -8,8 +8,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 import dispatcher.config as config_module
-from dispatcher.config import build_config, load_env_file
-from dispatcher.git import worktree_path_for_issue
+import dispatcher.repo_context as repo_context_module
+from dispatcher.config import build_config, load_env_file, resolve_base_branch
+from dispatcher.git import BranchLookup, worktree_path_for_issue
 from dispatcher.models import Issue
 from dispatcher.repo_context import config_for_repo
 
@@ -17,8 +18,9 @@ from dispatcher.repo_context import config_for_repo
 class ConfigTests(unittest.TestCase):
     def setUp(self) -> None:
         config_module._WARNED_BASE_BRANCH_FALLBACKS.clear()
+        repo_context_module._LOGGED_BASE_BRANCH_RESOLUTIONS.clear()
         self.branch_exists_patcher = patch(
-            "dispatcher.config.branch_exists", return_value=True
+            "dispatcher.config.lookup_branch", return_value=BranchLookup.PRESENT
         )
         self.branch_exists_patcher.start()
         self.addCleanup(self.branch_exists_patcher.stop)
@@ -68,7 +70,10 @@ class ConfigTests(unittest.TestCase):
             with (
                 patch("pathlib.Path.cwd", return_value=dispatcher_dir),
                 patch.dict("os.environ", {"DISPATCHER_REPO": "owner/repo"}, clear=True),
-                patch("dispatcher.config.branch_exists", return_value=True),
+                patch(
+                    "dispatcher.config.lookup_branch",
+                    return_value=BranchLookup.PRESENT,
+                ),
             ):
                 config = build_config(["--base-branch", "dev"])
 
@@ -83,8 +88,12 @@ class ConfigTests(unittest.TestCase):
                     "os.environ", {"DISPATCHER_REPO": "owner/repo"}, clear=True
                 ):
                     with patch(
-                        "dispatcher.config.branch_exists",
-                        side_effect=lambda branch, cwd=None: branch == "main",
+                        "dispatcher.config.lookup_branch",
+                        side_effect=lambda branch, cwd=None: (
+                            BranchLookup.PRESENT
+                            if branch == "main"
+                            else BranchLookup.ABSENT
+                        ),
                     ):
                         with self.assertWarns(UserWarning) as warning:
                             config = build_config(["--base-branch", "dev"])
@@ -94,8 +103,9 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(
             warning_message,
             "Branch 'dev' unavailable for owner/repo; "
-            "using 'main' (checkout/branch unavailable: /Projects/repo/dev; "
-            "checkout_exists=True).",
+            "using 'main' (cause=absent_on_origin, "
+            "project_dir=/Projects/repo/dev, "
+            "fallback_project_dir=/Projects/repo/main).",
         )
         self.assertNotIn("Branch check context", warning_message)
 
@@ -119,7 +129,14 @@ class ConfigTests(unittest.TestCase):
                     "dispatcher.config.checkout_exists",
                     side_effect=lambda path: path.name == "main",
                 ),
-                patch("dispatcher.config.branch_exists", return_value=True),
+                patch(
+                    "dispatcher.config.lookup_branch",
+                    side_effect=lambda branch, cwd=None: (
+                        BranchLookup.PRESENT
+                        if branch == "main"
+                        else BranchLookup.ABSENT
+                    ),
+                ),
                 self.assertWarns(UserWarning) as warning,
             ):
                 config = build_config(["--base-branch", "dev"])
@@ -131,10 +148,147 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(
             warning_message,
             "Branch 'dev' unavailable for owner/Portfolio-Web; "
-            f"using 'main' (checkout/branch unavailable: {repo_root / 'dev'}; "
-            "checkout_exists=False).",
+            "using 'main' (cause=absent_on_origin, "
+            f"project_dir={repo_root / 'dev'}, "
+            f"fallback_project_dir={repo_root / 'main'}).",
         )
         self.assertNotIn("Branch check context", warning_message)
+
+    def test_missing_requested_checkout_uses_fallback_cwd_for_branch_lookup(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dispatcher_dir = Path(temp_dir) / "dispatcher"
+            projects_dir = Path(temp_dir) / "Projects"
+            repo_root = projects_dir / "repo"
+            main_checkout = repo_root / "main"
+            dispatcher_dir.mkdir()
+            main_checkout.mkdir(parents=True)
+
+            with (
+                patch("pathlib.Path.cwd", return_value=dispatcher_dir),
+                patch.dict(
+                    "os.environ",
+                    {
+                        "DISPATCHER_REPO": "owner/repo",
+                        "DISPATCHER_PROJECTS_DIR": str(projects_dir),
+                    },
+                    clear=True,
+                ),
+                patch(
+                    "dispatcher.config.lookup_branch",
+                    return_value=BranchLookup.PRESENT,
+                ) as lookup,
+                patch(
+                    "dispatcher.config.checkout_exists",
+                    side_effect=lambda path: path.name == "main",
+                ),
+            ):
+                config = build_config(["--base-branch", "dev"])
+
+        self.assertEqual(config.base_branch, "dev")
+        self.assertEqual(config.paths.project_dir, main_checkout.resolve())
+        lookup.assert_any_call("dev", cwd=main_checkout.resolve())
+
+    def test_lookup_failure_falls_back_with_lookup_failed_cause(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dispatcher_dir = Path(temp_dir) / "dispatcher"
+            projects_dir = Path(temp_dir) / "Projects"
+            repo_root = projects_dir / "repo"
+            main_checkout = repo_root / "main"
+            dispatcher_dir.mkdir()
+            main_checkout.mkdir(parents=True)
+
+            with (
+                patch("pathlib.Path.cwd", return_value=dispatcher_dir),
+                patch.dict(
+                    "os.environ",
+                    {
+                        "DISPATCHER_REPO": "owner/repo",
+                        "DISPATCHER_PROJECTS_DIR": str(projects_dir),
+                    },
+                    clear=True,
+                ),
+                patch(
+                    "dispatcher.config.lookup_branch",
+                    side_effect=[BranchLookup.UNKNOWN, BranchLookup.PRESENT],
+                ),
+                self.assertWarns(UserWarning) as warning,
+            ):
+                config = build_config(["--base-branch", "dev"])
+
+        self.assertEqual(config.base_branch, "main")
+        self.assertEqual(config.paths.project_dir, main_checkout.resolve())
+        self.assertIn("cause=lookup_failed", str(warning.warning))
+
+    def test_resolve_base_branch_returns_resolution_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            dispatcher_dir = root / "dispatcher"
+            repo_root = root / "repo"
+            main_checkout = repo_root / "main"
+            dispatcher_dir.mkdir()
+            main_checkout.mkdir(parents=True)
+
+            with patch(
+                "dispatcher.config.lookup_branch",
+                side_effect=[BranchLookup.ABSENT, BranchLookup.PRESENT],
+            ):
+                with self.assertWarns(UserWarning):
+                    resolution = resolve_base_branch(
+                        "dev",
+                        repo="owner/repo",
+                        project_dir=(repo_root / "dev").resolve(),
+                        fallback_project_dir=main_checkout.resolve(),
+                        worktree_root=repo_root.resolve(),
+                        dispatcher_dir=dispatcher_dir.resolve(),
+                    )
+
+        self.assertEqual(resolution.branch, "main")
+        self.assertEqual(resolution.project_dir, main_checkout.resolve())
+        self.assertTrue(resolution.fell_back)
+        self.assertEqual(resolution.cause, "absent_on_origin")
+
+    def test_select_project_dir_prefers_existing_paths_then_sibling(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            worktree_root = root / "repo"
+            fallback = worktree_root / "main"
+            sibling = worktree_root / "release"
+            sibling.mkdir(parents=True)
+
+            with patch(
+                "dispatcher.config.checkout_exists",
+                side_effect=lambda path: path == fallback,
+            ):
+                self.assertEqual(
+                    config_module.select_project_dir(
+                        resolved_branch="dev",
+                        worktree_root=worktree_root,
+                        fallback_project_dir=fallback,
+                    ),
+                    fallback.resolve(),
+                )
+
+            with patch("dispatcher.config.checkout_exists", return_value=False):
+                self.assertEqual(
+                    config_module.select_project_dir(
+                        resolved_branch="dev",
+                        worktree_root=worktree_root,
+                        fallback_project_dir=fallback,
+                    ),
+                    sibling.resolve(),
+                )
+
+            with patch("dispatcher.config.checkout_exists", return_value=False):
+                self.assertEqual(
+                    config_module.select_project_dir(
+                        resolved_branch="dev",
+                        worktree_root=root / "missing",
+                        fallback_project_dir=fallback,
+                    ),
+                    (root / "missing" / "dev").resolve(),
+                )
 
     def test_missing_base_branch_and_main_raises_system_exit(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -143,7 +297,10 @@ class ConfigTests(unittest.TestCase):
             with (
                 patch("pathlib.Path.cwd", return_value=dispatcher_dir),
                 patch.dict("os.environ", {"DISPATCHER_REPO": "owner/repo"}, clear=True),
-                patch("dispatcher.config.branch_exists", return_value=False),
+                patch(
+                    "dispatcher.config.lookup_branch",
+                    return_value=BranchLookup.ABSENT,
+                ),
             ):
                 with warnings.catch_warnings(record=True) as caught:
                     with self.assertRaisesRegex(
@@ -161,7 +318,10 @@ class ConfigTests(unittest.TestCase):
             with (
                 patch("pathlib.Path.cwd", return_value=dispatcher_dir),
                 patch.dict("os.environ", {"DISPATCHER_REPO": "owner/repo"}, clear=True),
-                patch("dispatcher.config.branch_exists", return_value=False),
+                patch(
+                    "dispatcher.config.lookup_branch",
+                    return_value=BranchLookup.ABSENT,
+                ),
             ):
                 with warnings.catch_warnings(record=True) as caught:
                     with self.assertRaises(SystemExit) as raised:
@@ -184,7 +344,10 @@ class ConfigTests(unittest.TestCase):
             with (
                 patch("pathlib.Path.cwd", return_value=dispatcher_dir),
                 patch.dict("os.environ", {"DISPATCHER_REPO": "owner/repo"}, clear=True),
-                patch("dispatcher.config.branch_exists", return_value=False),
+                patch(
+                    "dispatcher.config.lookup_branch",
+                    return_value=BranchLookup.ABSENT,
+                ),
             ):
                 with warnings.catch_warnings(record=True) as caught:
                     with self.assertRaisesRegex(
@@ -419,7 +582,14 @@ class ConfigTests(unittest.TestCase):
                     "dispatcher.config.checkout_exists",
                     side_effect=lambda path: path.name == "main",
                 ),
-                patch("dispatcher.config.branch_exists", return_value=True),
+                patch(
+                    "dispatcher.config.lookup_branch",
+                    side_effect=lambda branch, cwd=None: (
+                        BranchLookup.PRESENT
+                        if branch == "main"
+                        else BranchLookup.ABSENT
+                    ),
+                ),
                 self.assertWarns(UserWarning),
             ):
                 config = build_config(["--base-branch", "dev"])
@@ -450,7 +620,14 @@ class ConfigTests(unittest.TestCase):
                     "dispatcher.config.checkout_exists",
                     side_effect=lambda path: path.name == "main",
                 ),
-                patch("dispatcher.config.branch_exists", return_value=True),
+                patch(
+                    "dispatcher.config.lookup_branch",
+                    side_effect=lambda branch, cwd=None: (
+                        BranchLookup.PRESENT
+                        if branch == "main"
+                        else BranchLookup.ABSENT
+                    ),
+                ),
                 warnings.catch_warnings(record=True) as caught,
             ):
                 warnings.simplefilter("always")
@@ -466,6 +643,34 @@ class ConfigTests(unittest.TestCase):
                 if "Branch 'dev' unavailable" in str(warning.message)
             ]
             self.assertEqual(len(branch_warnings), 1)
+
+    def test_repo_context_logs_base_branch_resolution_once(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dispatcher_dir = Path(temp_dir) / "dispatcher"
+            dispatcher_dir.mkdir()
+            with (
+                patch("pathlib.Path.cwd", return_value=dispatcher_dir),
+                patch.dict("os.environ", {"DISPATCHER_REPO": "owner/repo"}, clear=True),
+                patch("dispatcher.repo_context.LOGGER.info") as info,
+            ):
+                config = build_config([])
+                first = config_for_repo(config, "owner/repo")
+                second = config_for_repo(config, "owner/repo")
+
+        self.assertIs(first, config)
+        self.assertIs(second, config)
+        info.assert_called_once()
+        message = info.call_args.args[0]
+        args = info.call_args.args[1:]
+        self.assertIn("repo=%s", message)
+        self.assertIn("requested=%s", message)
+        self.assertIn("resolved=%s", message)
+        self.assertIn("project_dir=%s", message)
+        self.assertIn("fell_back=%s", message)
+        self.assertEqual(args[0], "owner/repo")
+        self.assertEqual(args[1], "main")
+        self.assertEqual(args[2], "main")
+        self.assertFalse(args[4])
 
     def test_reads_opus_label_and_model_from_environment(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

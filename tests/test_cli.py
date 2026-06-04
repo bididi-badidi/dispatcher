@@ -15,6 +15,7 @@ from dispatcher.cli import (
     main,
     run_polling_loop,
 )
+from dispatcher.git import BranchLookup
 from dispatcher.state import StateStore
 from tests.helpers import make_config
 
@@ -52,7 +53,10 @@ class CliTests(unittest.TestCase):
                 patch.dict(
                     "os.environ", {"DISPATCHER_REPO": "owner/target-repo"}, clear=True
                 ),
-                patch("dispatcher.config.branch_exists", return_value=True),
+                patch(
+                    "dispatcher.config.lookup_branch",
+                    return_value=BranchLookup.PRESENT,
+                ),
                 patch("dispatcher.config.checkout_exists", return_value=True),
                 patch("dispatcher.cli._run_daemon", return_value=0) as run_daemon,
             ):
@@ -71,7 +75,10 @@ class CliTests(unittest.TestCase):
                 patch.dict(
                     "os.environ", {"DISPATCHER_REPO": "owner/target-repo"}, clear=True
                 ),
-                patch("dispatcher.config.branch_exists", return_value=True),
+                patch(
+                    "dispatcher.config.lookup_branch",
+                    return_value=BranchLookup.PRESENT,
+                ),
                 patch("dispatcher.config.checkout_exists", return_value=True),
                 patch("dispatcher.cli.run_once", return_value=False),
                 patch("builtins.print") as print_,
@@ -79,7 +86,9 @@ class CliTests(unittest.TestCase):
                 result = main(["--once"])
 
             self.assertEqual(result, 0)
-            print_.assert_any_call("tracking 1 repo(s)")
+            print_.assert_any_call(
+                "tracking 1 repo(s) base_branch=main fallback_branch=main"
+            )
 
     def test_tracking_summary_printed_before_polling_loop(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -98,7 +107,10 @@ class CliTests(unittest.TestCase):
                 patch.dict(
                     "os.environ", {"DISPATCHER_REPO": "owner/target-repo"}, clear=True
                 ),
-                patch("dispatcher.config.branch_exists", return_value=True),
+                patch(
+                    "dispatcher.config.lookup_branch",
+                    return_value=BranchLookup.PRESENT,
+                ),
                 patch("dispatcher.config.checkout_exists", return_value=True),
                 patch("dispatcher.cli.run_polling_loop", side_effect=stop_polling),
                 patch("builtins.print") as print_,
@@ -108,7 +120,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(result, 130)
             calls = [call.args[0] for call in print_.call_args_list]
             self.assertLess(
-                calls.index("tracking 1 repo(s)"),
+                calls.index("tracking 1 repo(s) base_branch=main fallback_branch=main"),
                 calls.index(
                     "Polling for label 'automate' every "
                     "120 seconds. Press Ctrl-C to stop."
@@ -132,7 +144,9 @@ class CliTests(unittest.TestCase):
         with patch("builtins.print") as print_:
             _log_tracking_summary(config, RedisStore())
 
-        print_.assert_called_once_with("tracking 2 repo(s)")
+        print_.assert_called_once_with(
+            "tracking 2 repo(s) base_branch=main fallback_branch=main"
+        )
 
     def test_tracking_summary_printed_on_daemon(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -143,7 +157,10 @@ class CliTests(unittest.TestCase):
                 patch.dict(
                     "os.environ", {"DISPATCHER_REPO": "owner/target-repo"}, clear=True
                 ),
-                patch("dispatcher.config.branch_exists", return_value=True),
+                patch(
+                    "dispatcher.config.lookup_branch",
+                    return_value=BranchLookup.PRESENT,
+                ),
                 patch("dispatcher.config.checkout_exists", return_value=True),
                 patch("dispatcher.cli._run_daemon", return_value=0),
                 patch("builtins.print") as print_,
@@ -151,7 +168,9 @@ class CliTests(unittest.TestCase):
                 result = main(["--daemon"])
 
             self.assertEqual(result, 0)
-            print_.assert_any_call("tracking 1 repo(s)")
+            print_.assert_any_call(
+                "tracking 1 repo(s) base_branch=main fallback_branch=main"
+            )
 
     def test_daemon_returns_keyboard_interrupt_exit_code(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -229,7 +248,9 @@ class CliTests(unittest.TestCase):
         with patch("builtins.print") as print_:
             _log_tracking_summary(config, FailingRepoStore())
 
-        print_.assert_called_once_with("tracking unknown repo(s)")
+        print_.assert_called_once_with(
+            "tracking unknown repo(s) base_branch=main fallback_branch=main"
+        )
 
     def test_main_uses_local_store_without_redis_url(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -240,7 +261,10 @@ class CliTests(unittest.TestCase):
                 patch.dict(
                     "os.environ", {"DISPATCHER_REPO": "owner/target-repo"}, clear=True
                 ),
-                patch("dispatcher.config.branch_exists", return_value=True),
+                patch(
+                    "dispatcher.config.lookup_branch",
+                    return_value=BranchLookup.PRESENT,
+                ),
                 patch("dispatcher.config.checkout_exists", return_value=True),
                 patch("dispatcher.cli.StateStore") as state_store,
                 patch("dispatcher.cli.run_once", return_value=False),

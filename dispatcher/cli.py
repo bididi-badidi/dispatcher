@@ -9,6 +9,7 @@ from typing import Sequence
 
 from dispatcher.config import build_config
 from dispatcher.background import shutdown_default_background
+from dispatcher.constants import DEFAULT_BASE_BRANCH
 from dispatcher.github import list_triggered_issues
 from dispatcher.models import Config
 from dispatcher.pipeline import first_unstarted_issue, run_pipeline
@@ -114,7 +115,13 @@ def _log_tracking_summary(config: Config, store: StateBackend) -> None:
     try:
         repo_count = len(_repos_for_polling(config, store))
     except Exception:
-        print("tracking unknown repo(s)")
+        print(
+            "tracking unknown repo(s) "
+            f"base_branch={config.base_branch} fallback_branch={DEFAULT_BASE_BRANCH}"
+        )
         return
 
-    print(f"tracking {repo_count} repo(s)")
+    print(
+        f"tracking {repo_count} repo(s) "
+        f"base_branch={config.base_branch} fallback_branch={DEFAULT_BASE_BRANCH}"
+    )

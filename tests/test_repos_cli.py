@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from dispatcher import repos_cli
+from dispatcher.git import BranchLookup
 
 
 class ReposCliTests(unittest.TestCase):
@@ -98,7 +99,10 @@ class _PatchedEnv:
         self._temp_dir = temp_dir
         self._cwd_patch = patch("pathlib.Path.cwd", return_value=dispatcher_dir)
         self._env_patch = patch.dict("os.environ", env, clear=True)
-        self._branch_patch = patch("dispatcher.config.branch_exists", return_value=True)
+        self._branch_patch = patch(
+            "dispatcher.config.lookup_branch",
+            return_value=BranchLookup.PRESENT,
+        )
 
     def __enter__(self) -> None:
         self._temp_dir.__enter__()

@@ -1,11 +1,27 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+from enum import StrEnum
 import subprocess
 from pathlib import Path
 
 from dispatcher.models import Config, Issue
 
 BRANCH_REMOTE_LOOKUP_TIMEOUT_SECONDS = 5
+
+
+class BranchLookup(StrEnum):
+    PRESENT = "present"
+    ABSENT = "absent"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class _GitOutcome:
+    returncode: int
+    stdout: str
+    stderr: str
+    errored: bool = False
 
 
 def worktree_git_dir(worktree: Path) -> Path | None:
@@ -70,31 +86,55 @@ def require_worktree_path(worktree: Path) -> None:
 
 def branch_exists(branch: str, cwd: Path | None = None) -> bool:
     """Return True when a branch exists locally or on origin."""
-    if cwd is not None and not cwd.exists():
-        return False
+    return lookup_branch(branch, cwd=cwd) is BranchLookup.PRESENT
 
+
+def lookup_branch(branch: str, cwd: Path | None = None) -> BranchLookup:
+    """Return a tri-state result for local or origin branch lookup."""
+    if cwd is None or not cwd.exists():
+        return BranchLookup.UNKNOWN
+
+    saw_error = False
     run_kwargs = {"capture_output": True, "cwd": cwd, "text": True}
 
     for ref in (f"refs/heads/{branch}", f"refs/remotes/origin/{branch}"):
         result = _run_git(["git", "show-ref", "--verify", "--quiet", ref], run_kwargs)
         if result.returncode == 0:
-            return True
+            return BranchLookup.PRESENT
+        if _is_clean_ref_miss(result):
+            continue
+        saw_error = True
 
     remote = _run_git(
         ["git", "ls-remote", "--heads", "origin", branch],
         {**run_kwargs, "timeout": BRANCH_REMOTE_LOOKUP_TIMEOUT_SECONDS},
     )
-    return bool(remote.stdout.strip())
+    if remote.errored:
+        return BranchLookup.UNKNOWN
+    if remote.returncode == 0:
+        return BranchLookup.PRESENT if remote.stdout.strip() else BranchLookup.ABSENT
+    if remote.stderr.strip():
+        return BranchLookup.UNKNOWN
+    return BranchLookup.UNKNOWN if saw_error else BranchLookup.ABSENT
 
 
 def _run_git(
     command: list[str],
     run_kwargs: dict[str, object],
-) -> subprocess.CompletedProcess[str]:
+) -> _GitOutcome:
     try:
-        return subprocess.run(command, **run_kwargs)
+        result = subprocess.run(command, **run_kwargs)
+        return _GitOutcome(
+            returncode=result.returncode,
+            stdout=result.stdout or "",
+            stderr=result.stderr or "",
+        )
     except (FileNotFoundError, subprocess.TimeoutExpired):
-        return subprocess.CompletedProcess(command, returncode=1, stdout="", stderr="")
+        return _GitOutcome(returncode=1, stdout="", stderr="", errored=True)
+
+
+def _is_clean_ref_miss(result: _GitOutcome) -> bool:
+    return result.returncode == 1 and not result.stderr.strip() and not result.errored
 
 
 def repo_name_from_full_name(repo: str) -> str:
