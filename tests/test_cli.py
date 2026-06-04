@@ -1,17 +1,48 @@
 from __future__ import annotations
 
+import logging
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
 import main as legacy_main
-from dispatcher.cli import _log_tracking_summary, _run_daemon, main, run_polling_loop
+from dispatcher.cli import (
+    _configure_logging,
+    _log_tracking_summary,
+    _run_daemon,
+    main,
+    run_polling_loop,
+)
 from dispatcher.state import StateStore
 from tests.helpers import make_config
 
 
 class CliTests(unittest.TestCase):
+    def test_configure_logging_defaults_to_info_message_format(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = make_config(Path(temp_dir))
+
+            with patch("dispatcher.cli.logging.basicConfig") as basic_config:
+                _configure_logging(config)
+
+            basic_config.assert_called_once_with(
+                level=logging.INFO, format="%(message)s", force=True
+            )
+
+    def test_configure_logging_uses_debug_level_when_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = make_config(Path(temp_dir))
+            config = replace(config, debug=True)
+
+            with patch("dispatcher.cli.logging.basicConfig") as basic_config:
+                _configure_logging(config)
+
+            basic_config.assert_called_once_with(
+                level=logging.DEBUG, format="%(message)s", force=True
+            )
+
     def test_main_runs_daemon_when_requested(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             dispatcher_dir = Path(temp_dir) / "dispatcher"

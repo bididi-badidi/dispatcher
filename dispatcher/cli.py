@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import sys
 import time
 from collections.abc import Callable
@@ -36,6 +37,7 @@ def run_once(config: Config, store: StateBackend) -> bool:
 
 def main(argv: Sequence[str] | None = None) -> int:
     config = build_config(argv)
+    _configure_logging(config)
     store: StateBackend
     if config.redis_url:
         from dispatcher.redis_store import RedisStateStore
@@ -62,6 +64,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         shutdown_default_background(wait=True)
 
     return 0
+
+
+def _configure_logging(config: Config) -> None:
+    logging.basicConfig(
+        level=logging.DEBUG if config.debug else logging.INFO,
+        format="%(message)s",
+        force=True,
+    )
 
 
 def _run_daemon(config: Config, store: StateBackend) -> int:
