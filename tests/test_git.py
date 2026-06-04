@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from dispatcher.git import branch_exists
+from dispatcher.git import BRANCH_REMOTE_LOOKUP_TIMEOUT_SECONDS, branch_exists
 
 
 class GitTests(unittest.TestCase):
@@ -49,8 +49,31 @@ class GitTests(unittest.TestCase):
         with patch(
             "dispatcher.git.subprocess.run",
             side_effect=[missing_ref, missing_ref, origin_has_branch],
-        ):
+        ) as run:
             self.assertTrue(branch_exists("dev"))
+        run.assert_any_call(
+            ["git", "ls-remote", "--heads", "origin", "dev"],
+            capture_output=True,
+            cwd=None,
+            text=True,
+            timeout=BRANCH_REMOTE_LOOKUP_TIMEOUT_SECONDS,
+        )
+
+    def test_branch_exists_returns_false_when_origin_lookup_times_out(self) -> None:
+        missing_ref = subprocess.CompletedProcess(args=[], returncode=1)
+
+        with patch(
+            "dispatcher.git.subprocess.run",
+            side_effect=[
+                missing_ref,
+                missing_ref,
+                subprocess.TimeoutExpired(
+                    ["git", "ls-remote", "--heads", "origin", "dev"],
+                    BRANCH_REMOTE_LOOKUP_TIMEOUT_SECONDS,
+                ),
+            ],
+        ):
+            self.assertFalse(branch_exists("dev"))
 
     def test_branch_exists_returns_false_for_missing_cwd(self) -> None:
         with patch("dispatcher.git.subprocess.run") as run:

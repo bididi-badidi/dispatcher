@@ -94,7 +94,8 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(
             warning_message,
             "Branch 'dev' unavailable for owner/repo; "
-            "using 'main' (missing checkout: /Projects/repo/dev).",
+            "using 'main' (checkout/branch unavailable: /Projects/repo/dev; "
+            "checkout_exists=True).",
         )
         self.assertNotIn("Branch check context", warning_message)
 
@@ -130,7 +131,8 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(
             warning_message,
             "Branch 'dev' unavailable for owner/Portfolio-Web; "
-            f"using 'main' (missing checkout: {repo_root / 'dev'}).",
+            f"using 'main' (checkout/branch unavailable: {repo_root / 'dev'}; "
+            "checkout_exists=False).",
         )
         self.assertNotIn("Branch check context", warning_message)
 
@@ -142,13 +144,15 @@ class ConfigTests(unittest.TestCase):
                 patch("pathlib.Path.cwd", return_value=dispatcher_dir),
                 patch.dict("os.environ", {"DISPATCHER_REPO": "owner/repo"}, clear=True),
                 patch("dispatcher.config.branch_exists", return_value=False),
-                self.assertWarns(UserWarning),
             ):
-                with self.assertRaisesRegex(
-                    SystemExit,
-                    "fallback 'main' is not available",
-                ):
-                    build_config(["--base-branch", "dev"])
+                with warnings.catch_warnings(record=True) as caught:
+                    with self.assertRaisesRegex(
+                        SystemExit,
+                        "fallback 'main' is not available",
+                    ):
+                        build_config(["--base-branch", "dev"])
+
+            self.assertEqual(caught, [])
 
     def test_missing_base_branch_error_includes_context(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -158,12 +162,13 @@ class ConfigTests(unittest.TestCase):
                 patch("pathlib.Path.cwd", return_value=dispatcher_dir),
                 patch.dict("os.environ", {"DISPATCHER_REPO": "owner/repo"}, clear=True),
                 patch("dispatcher.config.branch_exists", return_value=False),
-                self.assertWarns(UserWarning),
             ):
-                with self.assertRaises(SystemExit) as raised:
-                    build_config(["--base-branch", "dev"])
+                with warnings.catch_warnings(record=True) as caught:
+                    with self.assertRaises(SystemExit) as raised:
+                        build_config(["--base-branch", "dev"])
 
         message = str(raised.exception)
+        self.assertEqual(caught, [])
         self.assertIn("branch 'dev' is not available", message)
         self.assertIn("repo=owner/repo", message)
         self.assertIn("requested_branch=dev", message)

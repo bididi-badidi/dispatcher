@@ -5,6 +5,8 @@ from pathlib import Path
 
 from dispatcher.models import Config, Issue
 
+BRANCH_REMOTE_LOOKUP_TIMEOUT_SECONDS = 5
+
 
 def worktree_git_dir(worktree: Path) -> Path | None:
     git_marker = worktree / ".git"
@@ -78,7 +80,10 @@ def branch_exists(branch: str, cwd: Path | None = None) -> bool:
         if result.returncode == 0:
             return True
 
-    remote = _run_git(["git", "ls-remote", "--heads", "origin", branch], run_kwargs)
+    remote = _run_git(
+        ["git", "ls-remote", "--heads", "origin", branch],
+        {**run_kwargs, "timeout": BRANCH_REMOTE_LOOKUP_TIMEOUT_SECONDS},
+    )
     return bool(remote.stdout.strip())
 
 
@@ -88,7 +93,7 @@ def _run_git(
 ) -> subprocess.CompletedProcess[str]:
     try:
         return subprocess.run(command, **run_kwargs)
-    except FileNotFoundError:
+    except (FileNotFoundError, subprocess.TimeoutExpired):
         return subprocess.CompletedProcess(command, returncode=1, stdout="", stderr="")
 
 

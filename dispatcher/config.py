@@ -145,17 +145,18 @@ def resolve_base_branch(
             f"{context}"
         )
 
-    warn_base_branch_fallback_once(
-        repo=repo,
-        branch=branch,
-        project_dir=project_dir,
-        fallback_project_dir=fallback_project_dir,
-        worktree_root=worktree_root,
-        context=context,
-    )
     if fallback_project_dir_exists and branch_exists(
         DEFAULT_BASE_BRANCH, fallback_project_dir
     ):
+        warn_base_branch_fallback_once(
+            repo=repo,
+            branch=branch,
+            project_dir=project_dir,
+            project_dir_exists=project_dir_exists,
+            fallback_project_dir=fallback_project_dir,
+            worktree_root=worktree_root,
+            context=context,
+        )
         return DEFAULT_BASE_BRANCH
 
     raise SystemExit(
@@ -169,6 +170,7 @@ def warn_base_branch_fallback_once(
     repo: str | None,
     branch: str,
     project_dir: Path,
+    project_dir_exists: bool,
     fallback_project_dir: Path,
     worktree_root: Path,
     context: str,
@@ -181,7 +183,8 @@ def warn_base_branch_fallback_once(
     warnings.warn(
         f"Branch '{branch}' unavailable for {repo or '<redis-discovered>'}; "
         f"using '{DEFAULT_BASE_BRANCH}' "
-        f"(missing checkout: {project_dir}).",
+        f"(checkout/branch unavailable: {project_dir}; "
+        f"checkout_exists={project_dir_exists}).",
         stacklevel=4,
     )
 
