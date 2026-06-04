@@ -80,6 +80,18 @@ class LangGraphPipelineTests(unittest.TestCase):
                 self.assertEqual(saved["pr_review_cursor"], 88)
                 self.assertEqual(saved["pr_issue_comment_cursor"], 0)
                 self.assertEqual(saved["pr_review_comment_cursor"], 0)
+                flow_path = config.paths.log_dir / config.repo / "issue-3-flow.log"
+                self.assertTrue(flow_path.is_file())
+                flow = flow_path.read_text(encoding="utf-8")
+                self.assertIn("\u2192 START", flow)
+                self.assertIn("\u2192 create_worktree", flow)
+                self.assertIn("\u2192 plan", flow)
+                self.assertIn("\u2192 build (iteration 1)", flow)
+                self.assertIn("\u2192 review_plan [approved]", flow)
+                self.assertIn("\u2192 review_quality [approved]", flow)
+                self.assertIn("\u2192 route_reviews [approved]", flow)
+                self.assertIn("\u2192 open_pr [pr_opened]", flow)
+                self.assertTrue(flow.endswith("\u21e5 END"))
 
         asyncio.run(scenario())
 
@@ -172,6 +184,13 @@ class LangGraphPipelineTests(unittest.TestCase):
                 self.assertEqual(state.pr_review_comment_cursor, 0)
                 self.assertEqual(calls.count("build"), 2)
                 self.assertEqual(calls.count("open_pr"), 1)
+                flow = (
+                    config.paths.log_dir / config.repo / "issue-4-flow.log"
+                ).read_text(encoding="utf-8")
+                self.assertIn("\u2192 build (iteration 1)", flow)
+                self.assertIn("\u2192 route_reviews [changes_requested]", flow)
+                self.assertIn("\u2192 build (iteration 2)", flow)
+                self.assertIn("\u2192 route_reviews [approved]", flow)
 
         asyncio.run(scenario())
 
@@ -245,5 +264,10 @@ class LangGraphPipelineTests(unittest.TestCase):
                 saved = store.get(config.repo, 6)
                 self.assertEqual(saved["status"], "failed")
                 self.assertEqual(saved["error"], "shutdown requested")
+                flow = (
+                    config.paths.log_dir / config.repo / "issue-6-flow.log"
+                ).read_text(encoding="utf-8")
+                self.assertIn("\u2192 START", flow)
+                self.assertIn("\u21e5 FAILED [shutdown requested]", flow)
 
         asyncio.run(scenario())

@@ -28,7 +28,12 @@ from dispatcher.runners import (
     GeminiPrRunner,
     build_stage_runners,
 )
-from dispatcher.s3_logs import issue_stage_log_paths, uploader_from_config
+from dispatcher.s3_logs import (
+    issue_flow_log_path,
+    issue_stage_log_paths,
+    uploader_from_config,
+)
+from dispatcher.session_log import FlowTrace
 from dispatcher.state_backend import StateBackend
 from dispatcher.time_utils import utc_now
 
@@ -132,10 +137,15 @@ async def async_run_langgraph_pipeline(
             "pr_review_comment_cursor"
         )
 
-    graph = _build_graph(config, store, issue, shutdown_event)
+    flow = FlowTrace()
+    await flow.enter("START")
+    _persist_flow_trace(config, issue.number, flow)
+    graph = _build_graph(config, store, issue, shutdown_event, flow)
     try:
         final_state = await graph.ainvoke(initial_state)
     except Exception as exc:
+        await flow.exit("FAILED", status=str(exc))
+        _persist_flow_trace(config, issue.number, flow)
         # Preserve whatever the last persisted node wrote, if any, so failures
         # late in the graph don't overwrite useful progress in the state store.
         latest = store.get(repo, issue.number) or {}
@@ -161,6 +171,8 @@ async def async_run_langgraph_pipeline(
         _submit_issue_upload(config, issue.number)
         raise
 
+    await flow.exit("END")
+    _persist_flow_trace(config, issue.number, flow)
     persisted_state = _persist_state(config, store, final_state)
     _submit_issue_upload(config, issue.number)
     return persisted_state
@@ -171,10 +183,12 @@ def _build_graph(
     store: StateBackend,
     issue: Issue,
     shutdown_event: asyncio.Event,
+    flow: FlowTrace,
 ):
     runners = build_stage_runners(config)
 
     async def create_worktree(state: PipelineState) -> dict[str, object]:
+        await flow.enter("create_worktree")
         _raise_if_shutdown(shutdown_event)
         worktree = state["worktree"]
         branch = state["branch"]
@@ -189,9 +203,11 @@ def _build_graph(
 
         updates = {"status": "worktree_created", "error": None}
         _persist_state(config, store, state | updates)
+        await flow.exit("create_worktree", status="worktree_created")
         return updates
 
     async def plan(state: PipelineState) -> dict[str, object]:
+        await flow.enter("plan")
         _raise_if_shutdown(shutdown_event)
         worktree = state["worktree"]
         branch = state["branch"]
@@ -207,13 +223,15 @@ def _build_graph(
             "error": None,
         }
         _persist_state(config, store, state | updates)
+        await flow.exit("plan", status="planned")
         return updates
 
     async def build(state: PipelineState) -> dict[str, object]:
-        _raise_if_shutdown(shutdown_event)
         worktree = state["worktree"]
         branch = state["branch"]
         build_iteration = int(state.get("build_iteration", 0)) + 1
+        await flow.enter("build", iteration=build_iteration)
+        _raise_if_shutdown(shutdown_event)
         prompt_template = config.commands.build
         if state.get("build_feedback"):
             prompt_template = (
@@ -234,9 +252,11 @@ def _build_graph(
             "error": None,
         }
         _persist_state(config, store, state | updates)
+        await flow.exit("build", status="built")
         return updates
 
     async def review_plan(state: PipelineState) -> dict[str, object]:
+        await flow.enter("review_plan")
         _raise_if_shutdown(shutdown_event)
         output = await _run_review(
             "review_plan",
@@ -251,9 +271,11 @@ def _build_graph(
             "plan_review_feedback": feedback,
         }
         _persist_state(config, store, state | updates)
+        await flow.exit("review_plan", status=verdict)
         return updates
 
     async def review_quality(state: PipelineState) -> dict[str, object]:
+        await flow.enter("review_quality")
         _raise_if_shutdown(shutdown_event)
         output = await _run_review(
             "review_quality",
@@ -268,9 +290,11 @@ def _build_graph(
             "quality_review_feedback": feedback,
         }
         _persist_state(config, store, state | updates)
+        await flow.exit("review_quality", status=verdict)
         return updates
 
     async def route_reviews(state: PipelineState) -> dict[str, object]:
+        await flow.enter("route_reviews")
         _raise_if_shutdown(shutdown_event)
         feedback = _combined_feedback(state)
         if feedback and int(state["build_iteration"]) >= int(state["max_iterations"]):
@@ -296,9 +320,11 @@ def _build_graph(
                 "error": None,
             }
         _persist_state(config, store, state | updates)
+        await flow.exit("route_reviews", status=str(updates["status"]))
         return updates
 
     async def open_pr(state: PipelineState) -> dict[str, object]:
+        await flow.enter("open_pr")
         _raise_if_shutdown(shutdown_event)
         if state.get("task_type") == "review" and state.get("pr_url"):
             updates = {
@@ -307,6 +333,7 @@ def _build_graph(
                 "error": None,
             }
             _persist_state(config, store, state | updates)
+            await flow.exit("open_pr", status="pr_opened")
             return updates
 
         output = await async_run_stage(
@@ -334,6 +361,7 @@ def _build_graph(
             "error": None,
         }
         _persist_state(config, store, state | updates)
+        await flow.exit("open_pr", status="pr_opened")
         return updates
 
     def after_reviews(state: PipelineState) -> str:
@@ -445,6 +473,13 @@ def _plan_path(worktree: Path, branch: str) -> Path:
     return worktree / ".ai" / "assets" / "branches" / branch / "plan.md"
 
 
+def _persist_flow_trace(config: Config, issue_number: int, flow: FlowTrace) -> None:
+    repo = _require_repo(config)
+    path = issue_flow_log_path(config.paths.log_dir, repo, issue_number)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(flow.render(), encoding="utf-8")
+
+
 def _raise_if_shutdown(shutdown_event: asyncio.Event) -> None:
     if shutdown_event.is_set():
         raise RuntimeError("shutdown requested")
@@ -462,11 +497,11 @@ def _submit_issue_upload(config: Config, issue_number: int) -> None:
     if uploader is None:
         return
     stage_paths = issue_stage_log_paths(config.paths.log_dir, repo, issue_number)
-    if not stage_paths:
+    flow_path = issue_flow_log_path(config.paths.log_dir, repo, issue_number)
+    if not stage_paths and not flow_path.is_file():
         return
+    paths = [*stage_paths, flow_path] if flow_path.is_file() else stage_paths
 
     from dispatcher.background import get_default_background
 
-    get_default_background().submit_issue_upload(
-        uploader, repo, issue_number, stage_paths
-    )
+    get_default_background().submit_issue_upload(uploader, repo, issue_number, paths)
