@@ -81,6 +81,52 @@ class QueueTests(unittest.TestCase):
             snapshot = dispatcher.snapshot()
             self.assertEqual(snapshot.pending[0].task_type, TaskType.REVIEW)
 
+    def test_enqueue_task_logs_queued_event(self) -> None:
+        async def scenario() -> None:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                config = make_config(root)
+                store = StateStore(config.paths.state_file)
+                dispatcher = Dispatcher(config, store, max_workers=1)
+
+                issue = Issue(99, "Log me", "https://example.test/99")
+                task = Task(config.repo, issue)
+
+                with patch("dispatcher.queue.LOGGER.info") as mock_info:
+                    accepted = await dispatcher._enqueue_task(task)
+
+                self.assertTrue(accepted)
+                printed = " ".join(str(c) for c in mock_info.call_args_list)
+                self.assertIn("task queued", printed)
+                self.assertNotIn("[INFO]", printed)
+                self.assertNotIn("id=", printed)
+                self.assertIn(f"repo={config.repo}", printed)
+                self.assertIn("issue=99", printed)
+                self.assertIn("type=fresh", printed)
+
+        asyncio.run(scenario())
+
+    def test_enqueue_review_logs_queued_event(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config = make_config(root)
+            store = StateStore(config.paths.state_file)
+            dispatcher = Dispatcher(config, store, max_workers=1)
+
+            issue = Issue(42, "Review me", "https://example.test/42")
+
+            with patch("dispatcher.queue.LOGGER.info") as mock_info:
+                accepted = dispatcher.enqueue_review(issue)
+
+            self.assertTrue(accepted)
+            printed = " ".join(str(c) for c in mock_info.call_args_list)
+            self.assertIn("task queued", printed)
+            self.assertNotIn("[INFO]", printed)
+            self.assertNotIn("id=", printed)
+            self.assertIn(f"repo={config.repo}", printed)
+            self.assertIn("issue=42", printed)
+            self.assertIn("type=review", printed)
+
     def test_enqueue_stops_when_shutdown_requested_with_full_queue(self) -> None:
         async def scenario() -> None:
             with tempfile.TemporaryDirectory() as temp_dir:
