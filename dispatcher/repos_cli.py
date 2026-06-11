@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 from typing import Protocol, Sequence
 
-from dispatcher.config import build_config
+from dispatcher.config import load_env_file
 from dispatcher.redis_store import RedisStateStore
 
 REPO_PATTERN = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
@@ -24,14 +25,15 @@ class RepoStore(Protocol):
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse_args(argv)
 
-    try:
-        config = build_config([])
-    except SystemExit:
-        print("error: DISPATCHER_REDIS_URL is not set", file=sys.stderr)
-        return 2
+    load_env_file()
+    redis_url = args.redis_url or os.getenv("DISPATCHER_REDIS_URL")
 
-    if not config.redis_url:
-        print("error: DISPATCHER_REDIS_URL is not set", file=sys.stderr)
+    if not redis_url:
+        print(
+            "error: DISPATCHER_REDIS_URL is not set "
+            "(set the environment variable or pass --redis-url)",
+            file=sys.stderr,
+        )
         return 2
 
     for repo in getattr(args, "repos", []):
@@ -39,7 +41,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"error: invalid repo {repo!r}, expected owner/name", file=sys.stderr)
             return 2
 
-    store = RedisStateStore(config.redis_url)
+    store = RedisStateStore(redis_url)
     try:
         return _dispatch(args, store)
     finally:
@@ -50,6 +52,11 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="dispatcher-repos",
         description="Manage repositories tracked by the Redis-backed dispatcher.",
+    )
+    parser.add_argument(
+        "--redis-url",
+        default=None,
+        help="Redis URL (overrides DISPATCHER_REDIS_URL env var).",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
