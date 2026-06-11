@@ -64,6 +64,32 @@ class ReposCliTests(unittest.TestCase):
         store.remove_repo.assert_called_once_with("owner/repo")
         store.close.assert_called_once_with()
 
+    def test_redis_url_flag_overrides_env(self) -> None:
+        store = MagicMock()
+
+        with (
+            _configured_env(redis_url="redis://env"),
+            patch.object(repos_cli, "RedisStateStore", return_value=store) as store_cls,
+        ):
+            exit_code = repos_cli.main(["--redis-url", "redis://flag", "list"])
+
+        self.assertEqual(exit_code, 0)
+        store_cls.assert_called_once_with("redis://flag")
+        store.close.assert_called_once_with()
+
+    def test_redis_url_flag_used_when_env_missing(self) -> None:
+        store = MagicMock()
+
+        with (
+            _configured_env(redis_url=None),
+            patch.object(repos_cli, "RedisStateStore", return_value=store) as store_cls,
+        ):
+            exit_code = repos_cli.main(["--redis-url", "redis://flag", "list"])
+
+        self.assertEqual(exit_code, 0)
+        store_cls.assert_called_once_with("redis://flag")
+        store.close.assert_called_once_with()
+
     def test_missing_redis_url_exits_nonzero(self) -> None:
         with (
             _configured_env(redis_url=None),
@@ -74,7 +100,10 @@ class ReposCliTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 2)
         store.assert_not_called()
-        stderr.write.assert_any_call("error: DISPATCHER_REDIS_URL is not set")
+        stderr.write.assert_any_call(
+            "error: DISPATCHER_REDIS_URL is not set "
+            "(set the environment variable or pass --redis-url)"
+        )
 
 
 def _configured_env(redis_url: str | None = "redis://example"):
@@ -98,16 +127,13 @@ class _PatchedEnv:
         self._temp_dir = temp_dir
         self._cwd_patch = patch("pathlib.Path.cwd", return_value=dispatcher_dir)
         self._env_patch = patch.dict("os.environ", env, clear=True)
-        self._branch_patch = patch("dispatcher.config.branch_exists", return_value=True)
 
     def __enter__(self) -> None:
         self._temp_dir.__enter__()
         self._cwd_patch.__enter__()
         self._env_patch.__enter__()
-        self._branch_patch.__enter__()
 
     def __exit__(self, *args: object) -> None:
-        self._branch_patch.__exit__(*args)
         self._env_patch.__exit__(*args)
         self._cwd_patch.__exit__(*args)
         self._temp_dir.__exit__(*args)

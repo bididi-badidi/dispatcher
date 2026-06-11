@@ -27,6 +27,15 @@ These three flags are mutually exclusive.
 | `DISPATCHER_REPO=OWNER/REPO` | — | Single-repo mode. Required when Redis is not configured. |
 | `DISPATCHER_REDIS_URL=redis://...` | — | Enables Redis-backed state. Repos to poll are read from the `dispatcher:repos` set (managed with `dispatcher-repos`). |
 
+## Repository registration
+
+`dispatcher-repos` manages the Redis-backed repository set without loading the
+full dispatcher runtime config.
+
+| Flag / Env var | Default | Description |
+|----------------|---------|-------------|
+| `--redis-url URL` / `DISPATCHER_REDIS_URL=redis://...` | — | Redis URL for `dispatcher-repos add`, `dispatcher-repos list`, and `dispatcher-repos remove`. The flag overrides the environment variable. |
+
 ## Polling
 
 | Flag / Env var | Default | Description |
