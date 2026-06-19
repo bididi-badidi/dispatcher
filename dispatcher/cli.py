@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 import asyncio
-import logging
-import sys
 import time
 from collections.abc import Callable
 from typing import Sequence
 
-from dispatcher.config import build_config
 from dispatcher.background import shutdown_default_background
+from dispatcher.config import build_config
 from dispatcher.github import list_triggered_issues
+from dispatcher.logging_setup import LOGGER, configure_logging
 from dispatcher.models import Config
 from dispatcher.pipeline import first_unstarted_issue, run_pipeline
 from dispatcher.repo_context import config_for_repo
@@ -23,21 +22,24 @@ def run_once(config: Config, store: StateBackend) -> bool:
         issues = list_triggered_issues(repo_config, repo)
         issue = first_unstarted_issue(issues, repo, store)
         if issue is None:
-            print(f"No new open issues with label {config.label!r} in {repo}.")
+            LOGGER.info("No new open issues with label %r in %s.", config.label, repo)
             continue
 
         state = run_pipeline(issue, repo_config, store)
-        print(
-            f"Issue #{state.number} reached {state.status}: "
-            f"branch={state.branch} worktree={state.worktree}"
+        LOGGER.info(
+            "Issue #%d reached %s: branch=%s worktree=%s",
+            state.number,
+            state.status,
+            state.branch,
+            state.worktree,
         )
         return True
     return False
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    configure_logging()
     config = build_config(argv)
-    _configure_logging(config)
     store: StateBackend
     if config.redis_url:
         from dispatcher.redis_store import RedisStateStore
@@ -58,20 +60,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             run_polling_loop(config, store)
         except KeyboardInterrupt:
-            print("Stopping dispatcher polling.")
+            LOGGER.info("Stopping dispatcher polling.")
             return 130
     finally:
         shutdown_default_background(wait=True)
 
     return 0
-
-
-def _configure_logging(config: Config) -> None:
-    logging.basicConfig(
-        level=logging.DEBUG if config.debug else logging.INFO,
-        format="%(message)s",
-        force=True,
-    )
 
 
 def _run_daemon(config: Config, store: StateBackend) -> int:
@@ -80,7 +74,7 @@ def _run_daemon(config: Config, store: StateBackend) -> int:
     try:
         asyncio.run(Dispatcher(config, store).run())
     except KeyboardInterrupt:
-        print("Stopping dispatcher daemon.")
+        LOGGER.info("Stopping dispatcher daemon.")
         return 130
     return 0
 
@@ -90,15 +84,16 @@ def run_polling_loop(
     store: StateBackend,
     sleep: Callable[[float], None] = time.sleep,
 ) -> None:
-    print(
-        f"Polling for label {config.label!r} every "
-        f"{config.poll_interval_seconds:g} seconds. Press Ctrl-C to stop."
+    LOGGER.info(
+        "Polling for label %r every %g seconds. Press Ctrl-C to stop.",
+        config.label,
+        config.poll_interval_seconds,
     )
     while True:
         try:
             run_once(config, store)
         except Exception as exc:
-            print(f"Polling cycle failed: {exc}", file=sys.stderr)
+            LOGGER.exception("Polling cycle failed: %s", exc)
         sleep(config.poll_interval_seconds)
 
 
@@ -114,7 +109,7 @@ def _log_tracking_summary(config: Config, store: StateBackend) -> None:
     try:
         repo_count = len(_repos_for_polling(config, store))
     except Exception:
-        print("tracking unknown repo(s)")
+        LOGGER.info("tracking unknown repo(s)")
         return
 
-    print(f"tracking {repo_count} repo(s)")
+    LOGGER.info("tracking %d repo(s)", repo_count)

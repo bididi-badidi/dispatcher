@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import re
 import warnings
@@ -31,6 +32,7 @@ from dispatcher.prompts import (
 )
 
 ENV_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+LOGGER = logging.getLogger("dispatcher.config")
 _WARNED_BASE_BRANCH_FALLBACKS: set[tuple[str | None, str, Path, Path, Path]] = set()
 
 
@@ -303,8 +305,8 @@ def build_config(argv: Sequence[str] | None = None) -> Config:
     redis_url = os.getenv("DISPATCHER_REDIS_URL")
     opus_label = os.getenv("DISPATCHER_OPUS_LABEL", DEFAULT_OPUS_LABEL)
     opus_model = os.getenv("DISPATCHER_OPUS_MODEL", DEFAULT_PLAN_OPUS_MODEL)
-    s3_log_bucket = os.getenv("AWS_S3_LOG_BUCKET", "").strip() or None
-    s3_log_key_prefix = os.getenv("AWS_S3_LOG_KEY_PREFIX", "").strip()
+    s3_log_bucket = _session_log_bucket_from_env()
+    s3_log_key_prefix = _session_log_prefix_from_env()
     env_debug = os.getenv("DISPATCHER_DEBUG", "").strip().lower() in {
         "1",
         "true",
@@ -374,6 +376,35 @@ def build_config(argv: Sequence[str] | None = None) -> Config:
     )
     validate_config(config)
     return config
+
+
+def _session_log_bucket_from_env() -> str | None:
+    primary = os.getenv("DISPATCHER_SESSION_LOG_BUCKET", "").strip()
+    if primary:
+        return primary
+
+    legacy = os.getenv("AWS_S3_LOG_BUCKET", "").strip()
+    if legacy:
+        LOGGER.warning(
+            "AWS_S3_LOG_BUCKET is deprecated; use DISPATCHER_SESSION_LOG_BUCKET instead"
+        )
+        return legacy
+    return None
+
+
+def _session_log_prefix_from_env() -> str:
+    primary = os.getenv("DISPATCHER_SESSION_LOG_PREFIX")
+    if primary is not None:
+        return primary.strip() or "logs"
+
+    legacy = os.getenv("AWS_S3_LOG_KEY_PREFIX")
+    if legacy is not None and legacy.strip():
+        LOGGER.warning(
+            "AWS_S3_LOG_KEY_PREFIX is deprecated; use "
+            "DISPATCHER_SESSION_LOG_PREFIX instead"
+        )
+        return legacy.strip()
+    return "logs"
 
 
 def _branch_check_cwd(

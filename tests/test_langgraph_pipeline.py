@@ -134,6 +134,136 @@ class LangGraphPipelineTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
+    def test_emits_workflow_start_and_completion_logs(self) -> None:
+        async def scenario() -> None:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                config = make_config(root)
+                store = StateStore(config.paths.state_file)
+                issue = Issue(31, "Logged workflow", "https://example.test/31")
+
+                async def run_stage(name, runner, issue, config, worktree, branch):
+                    if name == "plan":
+                        plan_path = (
+                            worktree
+                            / ".ai"
+                            / "assets"
+                            / "branches"
+                            / branch
+                            / "plan.md"
+                        )
+                        plan_path.parent.mkdir(parents=True, exist_ok=True)
+                        plan_path.write_text("plan", encoding="utf-8")
+                    if name in {"review_plan", "review_quality"}:
+                        return "VERDICT: approved\n"
+                    if name == "open_pr":
+                        return "https://github.com/example/repo/pull/31"
+                    return ""
+
+                with (
+                    patch(
+                        "dispatcher.langgraph_pipeline.async_run_stage",
+                        side_effect=run_stage,
+                    ),
+                    patch(
+                        "dispatcher.langgraph_pipeline.initial_review_cursor",
+                        return_value=(1, 2, 3),
+                    ),
+                    self.assertLogs("dispatcher", level="INFO") as logs,
+                ):
+                    await async_run_langgraph_pipeline(
+                        Task(config.repo, issue), config, store, 7, asyncio.Event()
+                    )
+
+            output = "\n".join(logs.output)
+            self.assertIn("[DISPATCHER] Processing issue #31 in example/repo", output)
+            self.assertIn(
+                "[DISPATCHER] Completed #31 in example/repo status=pr_opened",
+                output,
+            )
+            complete_record = logs.records[-1]
+            self.assertEqual(complete_record.state["status"], "pr_opened")
+            self.assertEqual(
+                complete_record.state["worktree"], str(root.parent / "feat/issue-31")
+            )
+
+        asyncio.run(scenario())
+
+    def test_emits_failure_log_with_state(self) -> None:
+        async def scenario() -> None:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                config = make_config(root)
+                store = StateStore(config.paths.state_file)
+                issue = Issue(32, "Failed workflow", "https://example.test/32")
+
+                async def run_stage(name, runner, issue, config, worktree, branch):
+                    if name == "build":
+                        raise RuntimeError("build exploded")
+                    return ""
+
+                with (
+                    patch(
+                        "dispatcher.langgraph_pipeline.async_run_stage",
+                        side_effect=run_stage,
+                    ),
+                    self.assertLogs("dispatcher", level="ERROR") as logs,
+                ):
+                    with self.assertRaisesRegex(RuntimeError, "build exploded"):
+                        await async_run_langgraph_pipeline(
+                            Task(config.repo, issue),
+                            config,
+                            store,
+                            4,
+                            asyncio.Event(),
+                        )
+
+            output = "\n".join(logs.output)
+            self.assertIn("[DISPATCHER] Failed #32 in example/repo", output)
+            self.assertIn("build exploded", output)
+            self.assertEqual(logs.records[-1].state["status"], "failed")
+            self.assertEqual(logs.records[-1].state["error"], "build exploded")
+
+        asyncio.run(scenario())
+
+    def test_stage_two_crash_rolls_up_stage_one_log(self) -> None:
+        async def scenario() -> None:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                config = make_config(root)
+                store = StateStore(config.paths.state_file)
+                issue = Issue(33, "Plan crash", "https://example.test/33")
+
+                async def run_stage(name, runner, issue, config, worktree, branch):
+                    repo_log_dir = config.paths.log_dir / config.repo
+                    repo_log_dir.mkdir(parents=True, exist_ok=True)
+                    log_path = repo_log_dir / f"issue-{issue.number}-{name}.log"
+                    log_path.write_text(f"{name} captured output", encoding="utf-8")
+                    if name == "plan":
+                        raise RuntimeError("plan exploded")
+                    return ""
+
+                with patch(
+                    "dispatcher.langgraph_pipeline.async_run_stage",
+                    side_effect=run_stage,
+                ):
+                    with self.assertRaisesRegex(RuntimeError, "plan exploded"):
+                        await async_run_langgraph_pipeline(
+                            Task(config.repo, issue),
+                            config,
+                            store,
+                            4,
+                            asyncio.Event(),
+                        )
+
+                rollup = config.session_log_local_dir / config.repo / "issue_33.log"
+                self.assertTrue(rollup.is_file())
+                content = rollup.read_text(encoding="utf-8")
+                self.assertIn("=== worktree ===", content)
+                self.assertIn("worktree captured output", content)
+
+        asyncio.run(scenario())
+
     def test_retries_build_when_review_requests_changes(self) -> None:
         async def scenario() -> None:
             with tempfile.TemporaryDirectory() as temp_dir:

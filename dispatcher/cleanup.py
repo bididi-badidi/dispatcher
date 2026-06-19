@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import subprocess
-import sys
+import logging
 from pathlib import Path
 
 from dispatcher.subprocess_utils import print_subprocess_command
+
+LOGGER = logging.getLogger(__name__)
 
 
 def delete_remote_branch(branch: str, project_dir: Path) -> None:
@@ -30,7 +32,7 @@ def _run_best_effort(command: list[str], cwd: Path) -> None:
     try:
         _run(command, cwd)
     except subprocess.CalledProcessError as exc:
-        print(f"warn: cleanup command failed: {exc}", file=sys.stderr)
+        LOGGER.warning("cleanup command failed: %s", exc)
 
 
 def _run(command: list[str], cwd: Path) -> None:

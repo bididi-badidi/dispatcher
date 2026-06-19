@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import io
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -25,29 +27,27 @@ class ReposCliTests(unittest.TestCase):
 
     def test_add_invalid_repo_exits_nonzero(self) -> None:
         with _configured_env(), patch.object(repos_cli, "RedisStateStore") as store:
-            with patch("sys.stderr") as stderr:
+            with self.assertLogs("dispatcher.repos_cli", level="ERROR") as logs:
                 exit_code = repos_cli.main(["add", "bad-name"])
 
         self.assertEqual(exit_code, 2)
         store.assert_not_called()
-        stderr.write.assert_any_call(
-            "error: invalid repo 'bad-name', expected owner/name"
-        )
+        self.assertIn("error: invalid repo 'bad-name'", logs.output[0])
 
     def test_list_prints_sorted_store_members(self) -> None:
         store = MagicMock()
         store.get_repos.return_value = ["owner/a", "owner/z"]
+        stdout = io.StringIO()
 
         with (
             _configured_env(),
             patch.object(repos_cli, "RedisStateStore", return_value=store),
-            patch("builtins.print") as print_,
+            redirect_stdout(stdout),
         ):
             exit_code = repos_cli.main(["list"])
 
         self.assertEqual(exit_code, 0)
-        print_.assert_any_call("owner/a")
-        print_.assert_any_call("owner/z")
+        self.assertEqual(stdout.getvalue(), "owner/a\nowner/z\n")
         store.close.assert_called_once_with()
 
     def test_remove_exits_zero_when_repo_is_absent(self) -> None:
@@ -95,14 +95,15 @@ class ReposCliTests(unittest.TestCase):
             _configured_env(redis_url=None),
             patch.object(repos_cli, "RedisStateStore") as store,
         ):
-            with patch("sys.stderr") as stderr:
+            with self.assertLogs("dispatcher.repos_cli", level="ERROR") as logs:
                 exit_code = repos_cli.main(["list"])
 
         self.assertEqual(exit_code, 2)
         store.assert_not_called()
-        stderr.write.assert_any_call(
+        self.assertIn(
             "error: DISPATCHER_REDIS_URL is not set "
-            "(set the environment variable or pass --redis-url)"
+            "(set the environment variable or pass --redis-url)",
+            logs.output[0],
         )
 
 

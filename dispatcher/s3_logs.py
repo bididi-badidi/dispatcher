@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import io
-import os
+import logging
+import shutil
 from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
@@ -9,6 +10,7 @@ from typing import Iterable
 from dispatcher.models import Config
 
 CONTENT_TYPE = "text/plain; charset=utf-8"
+LOGGER = logging.getLogger("dispatcher.s3_logs")
 CANONICAL_STAGE_ORDER = (
     "worktree",
     "plan",
@@ -28,13 +30,6 @@ class S3LogUploader:
         self.bucket = bucket
         self.key_prefix = _normalize_key_prefix(key_prefix)
         self._client = client
-
-    @classmethod
-    def from_env(cls) -> S3LogUploader | None:
-        bucket = os.getenv("AWS_S3_LOG_BUCKET", "").strip()
-        if not bucket:
-            return None
-        return cls(bucket, os.getenv("AWS_S3_LOG_KEY_PREFIX", ""))
 
     def is_enabled(self) -> bool:
         return bool(self.bucket)
@@ -86,6 +81,46 @@ def uploader_from_config(config: Config) -> S3LogUploader | None:
     return _cached_uploader(bucket, config.s3_log_key_prefix)
 
 
+def write_stage_log_fallback(
+    config: Config, repo: str, issue_number: int, stage: str, path: Path
+) -> Path:
+    destination = _fallback_repo_dir(config, repo) / f"issue_{issue_number}-{stage}.log"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(path, destination)
+    LOGGER.info(
+        "wrote local session stage log fallback",
+        extra={
+            "repo": repo,
+            "issue_number": issue_number,
+            "stage": stage,
+            "path": str(destination),
+        },
+    )
+    return destination
+
+
+def write_issue_log_fallback(
+    config: Config, repo: str, issue_number: int, stage_paths: Iterable[Path]
+) -> Path | None:
+    sorted_paths = _sort_stage_paths(stage_paths, issue_number)
+    if not sorted_paths:
+        return None
+
+    destination = _fallback_repo_dir(config, repo) / f"issue_{issue_number}.log"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with destination.open("wb") as output:
+        for path in sorted_paths:
+            stage = _stage_name_from_path(path, issue_number)
+            output.write(f"=== {stage} ===\n".encode("utf-8"))
+            output.write(path.read_bytes())
+            output.write(b"\n\n")
+    LOGGER.info(
+        "wrote local session issue log fallback",
+        extra={"repo": repo, "issue_number": issue_number, "path": str(destination)},
+    )
+    return destination
+
+
 def issue_stage_log_paths(log_dir: Path, repo: str, issue_number: int) -> list[Path]:
     repo_log_dir = log_dir / repo
     if not repo_log_dir.is_dir():
@@ -93,6 +128,10 @@ def issue_stage_log_paths(log_dir: Path, repo: str, issue_number: int) -> list[P
     return _sort_stage_paths(
         repo_log_dir.glob(f"issue-{issue_number}-*.log"), issue_number
     )
+
+
+def _fallback_repo_dir(config: Config, repo: str) -> Path:
+    return config.session_log_local_dir / repo
 
 
 @lru_cache(maxsize=8)

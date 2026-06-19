@@ -4,7 +4,6 @@ import asyncio
 import enum
 import logging
 import signal
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -68,7 +67,7 @@ class Dispatcher:
 
     async def run(self) -> None:
         self._install_signal_handlers()
-        print(self._startup_message())
+        LOGGER.info(self._startup_message())
         poller = asyncio.create_task(self._poller())
         workers = [
             asyncio.create_task(self._worker(worker_id))
@@ -91,7 +90,7 @@ class Dispatcher:
                     await self._cleanup_merged_issues(repo)
                     await self._enqueue_review_responses(repo)
             except Exception as exc:
-                print(f"Polling cycle failed: {exc}", file=sys.stderr)
+                LOGGER.exception("Polling cycle failed: %s", exc)
 
             try:
                 await asyncio.wait_for(
@@ -162,9 +161,10 @@ class Dispatcher:
                 )
                 state.status = "cleaned_up"
             except Exception as exc:
-                print(
-                    f"warn: cleanup failed for issue #{issue.number}: {exc}",
-                    file=sys.stderr,
+                LOGGER.warning(
+                    "cleanup failed for issue #%d: %s",
+                    issue.number,
+                    exc,
                 )
             finally:
                 state.updated_at = utc_now()
@@ -189,9 +189,11 @@ class Dispatcher:
                 self._completed_count += 1
             except Exception as exc:
                 self._failed_count += 1
-                print(
-                    f"Worker {worker_id} failed issue #{task.issue.number}: {exc}",
-                    file=sys.stderr,
+                LOGGER.exception(
+                    "Worker %d failed issue #%d: %s",
+                    worker_id,
+                    task.issue.number,
+                    exc,
                 )
             finally:
                 self._active[worker_id] = None
@@ -279,9 +281,9 @@ class Dispatcher:
             try:
                 return list(self.store.get_repos())  # type: ignore[attr-defined]
             except Exception as exc:
-                print(
-                    f"warn: redis unavailable, skipping repo refresh: {exc}",
-                    file=sys.stderr,
+                LOGGER.warning(
+                    "redis unavailable, skipping repo refresh: %s",
+                    exc,
                 )
                 return []
         if self.config.repo:

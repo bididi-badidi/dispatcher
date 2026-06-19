@@ -3,9 +3,14 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
-from dispatcher.s3_logs import S3LogUploader, S3UploadError
+from tests.helpers import make_config
+from dispatcher.s3_logs import (
+    S3LogUploader,
+    S3UploadError,
+    write_issue_log_fallback,
+    write_stage_log_fallback,
+)
 
 
 class FakeS3Client:
@@ -17,20 +22,39 @@ class FakeS3Client:
 
 
 class S3LogTests(unittest.TestCase):
-    def test_from_env_disabled_when_bucket_unset_or_blank(self) -> None:
-        with patch.dict("os.environ", {}, clear=True):
-            self.assertIsNone(S3LogUploader.from_env())
+    def test_local_stage_fallback_copies_log_when_bucket_unset(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config = make_config(root)
+            source = root / "source.log"
+            source.write_text("stage output", encoding="utf-8")
 
-        with patch.dict("os.environ", {"AWS_S3_LOG_BUCKET": ""}, clear=True):
-            self.assertIsNone(S3LogUploader.from_env())
+            destination = write_stage_log_fallback(
+                config, "octocat/Hello-World", 42, "plan", source
+            )
 
-    def test_from_env_enabled(self) -> None:
-        with patch.dict("os.environ", {"AWS_S3_LOG_BUCKET": "logs"}, clear=True):
-            uploader = S3LogUploader.from_env()
+            self.assertEqual(destination.name, "issue_42-plan.log")
+            self.assertIn(".session_logs/octocat/Hello-World", str(destination))
+            self.assertEqual(destination.read_text(encoding="utf-8"), "stage output")
 
-        self.assertIsNotNone(uploader)
-        assert uploader is not None
-        self.assertTrue(uploader.is_enabled())
+    def test_local_issue_fallback_concatenates_logs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config = make_config(root)
+            worktree = root / "issue-42-worktree.log"
+            plan = root / "issue-42-plan.log"
+            worktree.write_text("worktree", encoding="utf-8")
+            plan.write_text("plan", encoding="utf-8")
+
+            destination = write_issue_log_fallback(
+                config, "octocat/Hello-World", 42, [plan, worktree]
+            )
+
+            assert destination is not None
+            body = destination.read_text(encoding="utf-8")
+            self.assertIn("=== worktree ===\nworktree", body)
+            self.assertIn("=== plan ===\nplan", body)
+            self.assertLess(body.index("=== worktree ==="), body.index("=== plan ==="))
 
     def test_upload_stage_log_key_format(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

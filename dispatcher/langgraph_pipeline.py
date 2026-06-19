@@ -15,6 +15,11 @@ from dispatcher.git import (
     worktree_path_for_issue,
 )
 from dispatcher.github import initial_review_cursor, pr_number_from_url
+from dispatcher.logging_setup import (
+    log_workflow_complete,
+    log_workflow_failed,
+    log_workflow_start,
+)
 from dispatcher.models import Config, Issue, IssueState
 from dispatcher.prompts import (
     default_open_pr_command,
@@ -28,7 +33,11 @@ from dispatcher.runners import (
     CodexOpenPrRunner,
     build_stage_runners,
 )
-from dispatcher.s3_logs import issue_stage_log_paths, uploader_from_config
+from dispatcher.s3_logs import (
+    issue_stage_log_paths,
+    uploader_from_config,
+    write_issue_log_fallback,
+)
 from dispatcher.state_backend import StateBackend
 from dispatcher.time_utils import utc_now
 
@@ -132,6 +141,14 @@ async def async_run_langgraph_pipeline(
             "pr_review_comment_cursor"
         )
 
+    log_workflow_start(
+        repo=repo,
+        issue_number=issue.number,
+        task_type=task_type,
+        worker_id=worker_id,
+        branch=branch,
+        worktree=worktree,
+    )
     graph = _build_graph(config, store, issue, shutdown_event)
     try:
         final_state = await graph.ainvoke(initial_state)
@@ -158,10 +175,19 @@ async def async_run_langgraph_pipeline(
         failed_state["error"] = str(exc)
         failed_state["worker_id"] = None
         _persist_state(config, store, failed_state)
+        log_workflow_failed(repo=repo, issue_number=issue.number, state=failed_state)
         _submit_issue_upload(config, issue.number)
         raise
 
     persisted_state = _persist_state(config, store, final_state)
+    log_workflow_complete(
+        repo=repo,
+        issue_number=issue.number,
+        status=persisted_state.status,
+        build_iteration=persisted_state.build_iteration,
+        pr_url=persisted_state.pr_url,
+        state=final_state,
+    )
     _submit_issue_upload(config, issue.number)
     return persisted_state
 
@@ -459,10 +485,11 @@ def _require_repo(config: Config) -> str:
 def _submit_issue_upload(config: Config, issue_number: int) -> None:
     repo = _require_repo(config)
     uploader = uploader_from_config(config)
-    if uploader is None:
-        return
     stage_paths = issue_stage_log_paths(config.paths.log_dir, repo, issue_number)
     if not stage_paths:
+        return
+    if uploader is None:
+        write_issue_log_fallback(config, repo, issue_number, stage_paths)
         return
 
     from dispatcher.background import get_default_background

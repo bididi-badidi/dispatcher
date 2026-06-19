@@ -51,7 +51,71 @@ Simple polling loop — processes newly labelled issues one at a time:
 DISPATCHER_REPO=OWNER/REPO uv run python main.py
 ```
 
-Daemon mode — concurrent worker pool, PR review response triggers:
+On startup, the dispatcher loads environment defaults from a `.env` file in the
+current dispatcher directory. Shell exports take precedence. Start from
+`.env.example` when creating a local `.env` file.
+
+Useful options:
+
+- `--label automate` chooses the trigger label.
+- `DISPATCHER_OPUS_LABEL=automate:opus` chooses the secondary label that
+  escalates only the planning stage to Opus.
+- `DISPATCHER_OPUS_MODEL=claude-opus-4-7` chooses the Claude model used when
+  the Opus escalation label is present.
+- `DISPATCHER_REDIS_URL=redis://...` enables Redis-backed repository tracking
+  and shared issue state. Repositories are read from the `dispatcher:repos`
+  Redis set.
+- `DISPATCHER_REPO=OWNER/REPO` keeps the single-repository local JSON fallback
+  when Redis is not configured.
+- `--base-branch main` chooses the branch used for the worktree.
+- The base checkout defaults to `/Projects/{repo_name}/main` regardless of
+  where the dispatcher is run.
+- New worktrees default to `/Projects/{repo_name}/{branch_name}`.
+- `DISPATCHER_PROJECTS_DIR` changes the repo/worktree root parent; it is
+  independent of `DISPATCHER_ROOT_DIR`.
+- Dispatcher state and logs stay under the dispatcher directory by default.
+- `--poll-interval 120` chooses the delay between polling cycles, in seconds.
+  It can also be set with `DISPATCHER_POLL_INTERVAL_SECONDS`.
+- `--once` runs a single polling cycle and exits.
+- `--daemon` runs the async worker queue instead of the simple long-polling
+  loop.
+- `--max-workers 3` sets the daemon worker count.
+- `--dry-run` writes the stage commands to `.dispatcher/logs/` without running
+  Gemini, Claude, or Codex.
+- The worktree stage must create the path selected by the dispatcher before
+  planning can start.
+
+### Session log uploads (optional)
+
+Set `DISPATCHER_SESSION_LOG_BUCKET` to upload dispatcher session logs after
+each stage and after each issue run. When unset, the dispatcher skips S3 and
+writes local fallback copies under `.dispatcher/logs/.session_logs/`. The
+canonical object key is `<prefix>/<owner>/<repo>/issue_<number>.log`;
+individual stage logs use
+`<prefix>/<owner>/<repo>/issue_<number>-<stage>.log`.
+
+`boto3` reads standard AWS credential and region variables such as
+`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_DEFAULT_REGION`.
+`DISPATCHER_SESSION_LOG_PREFIX` defaults to `logs` and can prepend a bucket
+prefix such as `dispatcher-prod/`. `AWS_S3_LOG_BUCKET` and
+`AWS_S3_LOG_KEY_PREFIX` still work as deprecated fallbacks for one release.
+Uploads run in the background; upload failures are logged as warnings and do
+not fail the issue pipeline.
+
+The generated state file defaults to `.dispatcher/state.json`; issue records
+are grouped by repository so `OWNER/REPO#7` does not collide with another
+repository's issue `#7`. Logs default to `.dispatcher/logs/` and use matching
+repository subdirectories.
+
+By default the process keeps running and polls every 120 seconds. A failed
+polling cycle is logged with its traceback, then the dispatcher waits for the
+next interval and tries again. Press Ctrl-C to stop the process.
+
+Daemon mode keeps the same polling source and stage runners, but enqueues
+unseen issues into an `asyncio` worker pool so multiple issue pipelines can run
+at the same time. Worker pipelines run through a LangGraph state graph:
+worktree creation, planning, build, parallel plan/code-quality reviews,
+conditional build retry, and PR opening.
 
 ```bash
 DISPATCHER_REPO=OWNER/REPO uv run python main.py --daemon
@@ -63,11 +127,7 @@ Redis-backed daemon — polls all registered repositories:
 DISPATCHER_REDIS_URL=redis://localhost:6379/0 uv run python main.py --daemon
 ```
 
-On startup the dispatcher loads environment defaults from a `.env` file in the
-current dispatcher directory. Shell exports take precedence. Start from
-`.env.example` when creating a local `.env` file.
-
-Use `--debug` or `DISPATCHER_DEBUG=1` to print subprocess commands to stdout.
+Use `--debug` or `DISPATCHER_DEBUG=1` to log subprocess commands.
 
 See [docs/cli-reference.md](docs/cli-reference.md) for all flags and
 environment variables.

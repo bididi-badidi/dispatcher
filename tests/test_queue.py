@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -422,3 +424,77 @@ class QueueTests(unittest.TestCase):
                 "Polling for label 'automate' every 120 seconds with "
                 "3 worker(s). Press Ctrl-C to stop.",
             )
+
+    def test_worker_failure_logs_without_stdout(self) -> None:
+        async def scenario() -> None:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                config = make_config(root)
+                store = StateStore(config.paths.state_file)
+                dispatcher = Dispatcher(config, store, max_workers=1)
+                stdout = io.StringIO()
+
+                async def fail_pipeline(*args, **kwargs):
+                    raise RuntimeError("pipeline exploded")
+
+                with (
+                    patch(
+                        "dispatcher.queue.async_run_langgraph_pipeline",
+                        side_effect=fail_pipeline,
+                    ),
+                    self.assertLogs("dispatcher.queue", level="ERROR") as logs,
+                    redirect_stdout(stdout),
+                ):
+                    worker = asyncio.create_task(dispatcher._worker(0))
+                    await dispatcher._queue.put(
+                        Task(
+                            config.repo,
+                            Issue(42, "Broken", "https://example.test/42"),
+                        )
+                    )
+                    await dispatcher._queue.put(None)
+                    await asyncio.wait_for(worker, timeout=1)
+
+                self.assertEqual(stdout.getvalue(), "")
+                self.assertTrue(logs.records)
+                self.assertIn("Worker 0 failed issue #42", logs.output[0])
+                self.assertEqual(dispatcher.snapshot().failed_count, 1)
+
+        asyncio.run(scenario())
+
+
+def test_worker_failure_keeps_stdout_silent(capsys) -> None:
+    async def scenario() -> Dispatcher:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config = make_config(root)
+            store = StateStore(config.paths.state_file)
+            dispatcher = Dispatcher(config, store, max_workers=1)
+
+            async def fail_pipeline(*args, **kwargs):
+                raise RuntimeError("pipeline exploded")
+
+            with (
+                patch(
+                    "dispatcher.queue.async_run_langgraph_pipeline",
+                    side_effect=fail_pipeline,
+                ),
+                patch("dispatcher.queue.LOGGER.exception") as log_exception,
+            ):
+                worker = asyncio.create_task(dispatcher._worker(0))
+                await dispatcher._queue.put(
+                    Task(
+                        config.repo,
+                        Issue(42, "Broken", "https://example.test/42"),
+                    )
+                )
+                await dispatcher._queue.put(None)
+                await asyncio.wait_for(worker, timeout=1)
+
+            log_exception.assert_called_once()
+            return dispatcher
+
+    dispatcher = asyncio.run(scenario())
+    out, _ = capsys.readouterr()
+    assert out == ""
+    assert dispatcher.snapshot().failed_count == 1
