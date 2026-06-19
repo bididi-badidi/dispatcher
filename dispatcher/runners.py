@@ -149,6 +149,52 @@ class GeminiRunner(AgentRunner):
         return env
 
 
+class CodexWorktreeRunner(AgentRunner):
+    stage_name = "worktree"
+    executable = "codex"
+
+    def __init__(self, prompt_template: str, worktree_root: Path) -> None:
+        super().__init__(prompt_template)
+        self.worktree_root = worktree_root
+
+    def cwd(self, config: Config, worktree: Path) -> Path:
+        return config.paths.project_dir
+
+    def command(self, prompt: str, cwd: Path) -> list[str]:
+        worktree_root = self.worktree_root.resolve()
+        git_write_dirs = codex_git_write_dirs(cwd)
+        # Codex's workspace-write sandbox protects `.git` from writes even
+        # inside the workspace, which blocks `git fetch` and `git worktree add`.
+        # When the project dir owns a real `.git` directory (not a pointer
+        # file), include it explicitly so the worktree stage can write refs.
+        inner_git_dir: Path | None = None
+        if not git_write_dirs:
+            candidate = (cwd / ".git").resolve()
+            if candidate.is_dir():
+                inner_git_dir = candidate
+        extra_dirs = [*git_write_dirs]
+        if inner_git_dir is not None:
+            extra_dirs.append(inner_git_dir)
+        writable_roots = [worktree_root, *extra_dirs]
+        command = [
+            self.executable,
+            "exec",
+            "--sandbox",
+            "workspace-write",
+            "--config",
+            "sandbox_workspace_write.network_access=true",
+            "--config",
+            "sandbox_workspace_write.writable_roots="
+            f"{json.dumps([str(p) for p in writable_roots])}",
+            "--add-dir",
+            str(worktree_root),
+        ]
+        for extra_dir in extra_dirs:
+            command.extend(["--add-dir", str(extra_dir)])
+        command.extend(["--cd", str(cwd), prompt])
+        return command
+
+
 class ClaudeRunner(AgentRunner):
     stage_name = "plan"
     executable = "claude"
@@ -245,9 +291,56 @@ class GeminiPrRunner(GeminiRunner):
         return worktree
 
 
+class CodexOpenPrRunner(AgentRunner):
+    stage_name = "open_pr"
+    executable = "codex"
+
+    def __init__(self, prompt_template: str) -> None:
+        super().__init__(prompt_template)
+        self._worktree: Path | None = None
+
+    def cwd(self, config: Config, worktree: Path) -> Path:
+        # Stash for command() since the base interface drops worktree here.
+        # Use /tmp as the workdir so the worktree is NOT auto-marked writable
+        # by codex's workspace-write sandbox — the agent can read source files
+        # but cannot edit them. /tmp stays writable by default for the PR body.
+        self._worktree = worktree
+        return Path("/tmp")
+
+    def command(self, prompt: str, cwd: Path) -> list[str]:
+        worktree = self._worktree
+        if worktree is None:
+            raise RuntimeError("CodexOpenPrRunner.cwd must run before command")
+        git_write_dirs = codex_git_write_dirs(worktree)
+        command = [
+            self.executable,
+            "exec",
+            "--sandbox",
+            "workspace-write",
+            "--skip-git-repo-check",
+            "--config",
+            "sandbox_workspace_write.network_access=true",
+        ]
+        if git_write_dirs:
+            command.extend(
+                [
+                    "--config",
+                    "sandbox_workspace_write.writable_roots="
+                    f"{json.dumps([str(p) for p in git_write_dirs])}",
+                ]
+            )
+        for git_write_dir in git_write_dirs:
+            command.extend(["--add-dir", str(git_write_dir)])
+        command.extend(["--cd", str(cwd), prompt])
+        return command
+
+
 def build_stage_runners(config: Config) -> dict[str, AgentRunner]:
     return {
-        "worktree": GeminiRunner(config.commands.worktree),
+        "worktree": CodexWorktreeRunner(
+            config.commands.worktree,
+            config.paths.worktree_root,
+        ),
         "plan": ClaudeRunner(config.commands.plan),
         "build": CodexRunner(config.commands.build),
     }

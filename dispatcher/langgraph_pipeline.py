@@ -25,7 +25,7 @@ from dispatcher.runners import (
     AgentRunner,
     ClaudeReviewRunner,
     CodexRunner,
-    GeminiPrRunner,
+    CodexOpenPrRunner,
     build_stage_runners,
 )
 from dispatcher.s3_logs import (
@@ -338,7 +338,7 @@ def _build_graph(
 
         output = await async_run_stage(
             "open_pr",
-            GeminiPrRunner(default_open_pr_command()),
+            CodexOpenPrRunner(default_open_pr_command()),
             issue,
             config,
             state["worktree"],
