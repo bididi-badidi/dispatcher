@@ -6,7 +6,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 import main as legacy_main
-from dispatcher.cli import _log_tracking_summary, _run_daemon, main, run_polling_loop
+from dispatcher.cli import (
+    _log_tracking_summary,
+    _run_daemon,
+    main,
+    run_polling_loop,
+)
 from dispatcher.state import StateStore
 from tests.helpers import make_config
 
@@ -31,7 +36,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(run_daemon.call_count, 1)
             self.assertIs(legacy_main.main, main)
 
-    def test_tracking_summary_printed_on_once(self) -> None:
+    def test_tracking_summary_logged_on_once(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             dispatcher_dir = Path(temp_dir) / "dispatcher"
             dispatcher_dir.mkdir()
@@ -44,11 +49,13 @@ class CliTests(unittest.TestCase):
                 patch("dispatcher.config.checkout_exists", return_value=True),
                 patch("dispatcher.cli.run_once", return_value=False),
                 patch("builtins.print") as print_,
+                self.assertLogs("dispatcher", level="INFO") as logs,
             ):
                 result = main(["--once"])
 
             self.assertEqual(result, 0)
-            print_.assert_any_call("tracking 1 repo(s)")
+            print_.assert_not_called()
+            self.assertIn("tracking 1 repo(s)", logs.output[0])
 
     def test_tracking_summary_printed_before_polling_loop(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -71,18 +78,15 @@ class CliTests(unittest.TestCase):
                 patch("dispatcher.config.checkout_exists", return_value=True),
                 patch("dispatcher.cli.run_polling_loop", side_effect=stop_polling),
                 patch("builtins.print") as print_,
+                self.assertLogs("dispatcher", level="INFO") as logs,
             ):
                 result = main([])
 
             self.assertEqual(result, 130)
-            calls = [call.args[0] for call in print_.call_args_list]
-            self.assertLess(
-                calls.index("tracking 1 repo(s)"),
-                calls.index(
-                    "Polling for label 'automate' every "
-                    "120 seconds. Press Ctrl-C to stop."
-                ),
+            print_.assert_called_once_with(
+                "Polling for label 'automate' every 120 seconds. Press Ctrl-C to stop."
             )
+            self.assertIn("tracking 1 repo(s)", logs.output[0])
 
     def test_tracking_summary_reflects_redis_repo_count(self) -> None:
         root = Path(tempfile.mkdtemp())
@@ -98,10 +102,14 @@ class CliTests(unittest.TestCase):
             def upsert(self, repo, state) -> None:
                 raise AssertionError("unexpected write")
 
-        with patch("builtins.print") as print_:
+        with (
+            patch("builtins.print") as print_,
+            self.assertLogs("dispatcher", level="INFO") as logs,
+        ):
             _log_tracking_summary(config, RedisStore())
 
-        print_.assert_called_once_with("tracking 2 repo(s)")
+        print_.assert_not_called()
+        self.assertIn("tracking 2 repo(s)", logs.output[0])
 
     def test_tracking_summary_printed_on_daemon(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -116,11 +124,13 @@ class CliTests(unittest.TestCase):
                 patch("dispatcher.config.checkout_exists", return_value=True),
                 patch("dispatcher.cli._run_daemon", return_value=0),
                 patch("builtins.print") as print_,
+                self.assertLogs("dispatcher", level="INFO") as logs,
             ):
                 result = main(["--daemon"])
 
             self.assertEqual(result, 0)
-            print_.assert_any_call("tracking 1 repo(s)")
+            print_.assert_not_called()
+            self.assertIn("tracking 1 repo(s)", logs.output[0])
 
     def test_daemon_returns_keyboard_interrupt_exit_code(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -222,10 +232,14 @@ class CliTests(unittest.TestCase):
             def upsert(self, repo, state) -> None:
                 raise AssertionError("unexpected write")
 
-        with patch("builtins.print") as print_:
+        with (
+            patch("builtins.print") as print_,
+            self.assertLogs("dispatcher", level="INFO") as logs,
+        ):
             _log_tracking_summary(config, FailingRepoStore())
 
-        print_.assert_called_once_with("tracking unknown repo(s)")
+        print_.assert_not_called()
+        self.assertIn("tracking unknown repo(s)", logs.output[0])
 
     def test_main_uses_local_store_without_redis_url(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -10,11 +10,14 @@ from dispatcher.prompts import (
 
 
 class PromptTests(unittest.TestCase):
-    def test_default_worktree_prompt_is_minimal(self) -> None:
+    def test_default_worktree_prompt_describes_codex_worktree_task(self) -> None:
         self.assertEqual(
             default_worktree_command(),
             "Create a git worktree for GitHub issue #$issue_number "
-            "($issue_title) based on $base_branch at $worktree using branch $branch.",
+            "($issue_title): from $project_dir, fetch origin $base_branch if needed, "
+            "create $worktree using branch $branch based on $base_branch, then copy "
+            "seed config files such as .env and .env.local from $project_dir into "
+            "$worktree. Do not modify code.",
         )
 
     def test_default_plan_prompt_uses_branch_assets_and_code_wording(self) -> None:

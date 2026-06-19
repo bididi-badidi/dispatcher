@@ -8,12 +8,35 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-from dispatcher.models import Issue, IssueState
 from dispatcher.github import TerminalPr
+from dispatcher.models import Issue, IssueState
 from dispatcher.queue import Dispatcher, Task, TaskType
 from dispatcher.state import StateStore
 from dispatcher.time_utils import utc_now
 from tests.helpers import make_config
+
+
+def assert_task_queued_log(
+    test_case: unittest.TestCase,
+    mock_info,
+    *,
+    repo: str,
+    issue_number: int,
+    task_type: TaskType,
+    queue_depth: int,
+) -> None:
+    mock_info.assert_called_once()
+    args = mock_info.call_args.args
+    test_case.assertEqual(
+        args[0],
+        "task queued | id=%s repo=%s issue=%s type=%s queued_at=%s queue_depth=%d",
+    )
+    test_case.assertEqual(args[1], f"{repo}#{issue_number}:{task_type.value}")
+    test_case.assertEqual(args[2], repo)
+    test_case.assertEqual(args[3], issue_number)
+    test_case.assertEqual(args[4], task_type.value)
+    test_case.assertIsNotNone(args[5])
+    test_case.assertEqual(args[6], queue_depth)
 
 
 class QueueTests(unittest.TestCase):
@@ -95,14 +118,21 @@ class QueueTests(unittest.TestCase):
                 issue = Issue(99, "Log me", "https://example.test/99")
                 task = Task(config.repo, issue)
 
-                with patch("dispatcher.queue.LOGGER.info") as mock_info:
+                with (
+                    patch("dispatcher.queue.LOGGER.isEnabledFor", return_value=True),
+                    patch("dispatcher.queue.LOGGER.info") as mock_info,
+                ):
                     accepted = await dispatcher._enqueue_task(task)
 
                 self.assertTrue(accepted)
-                printed = " ".join(str(c) for c in mock_info.call_args_list)
-                self.assertIn("[INFO] task queued", printed)
-                self.assertIn("issue=99", printed)
-                self.assertIn("type=fresh", printed)
+                assert_task_queued_log(
+                    self,
+                    mock_info,
+                    repo=config.repo,
+                    issue_number=99,
+                    task_type=TaskType.FRESH,
+                    queue_depth=1,
+                )
 
         asyncio.run(scenario())
 
@@ -115,14 +145,44 @@ class QueueTests(unittest.TestCase):
 
             issue = Issue(42, "Review me", "https://example.test/42")
 
-            with patch("dispatcher.queue.LOGGER.info") as mock_info:
+            with (
+                patch("dispatcher.queue.LOGGER.isEnabledFor", return_value=True),
+                patch("dispatcher.queue.LOGGER.info") as mock_info,
+            ):
                 accepted = dispatcher.enqueue_review(issue)
 
             self.assertTrue(accepted)
-            printed = " ".join(str(c) for c in mock_info.call_args_list)
-            self.assertIn("[INFO] task queued", printed)
-            self.assertIn("issue=42", printed)
-            self.assertIn("type=review", printed)
+            assert_task_queued_log(
+                self,
+                mock_info,
+                repo=config.repo,
+                issue_number=42,
+                task_type=TaskType.REVIEW,
+                queue_depth=1,
+            )
+
+    def test_enqueue_task_skips_log_fields_when_info_disabled(self) -> None:
+        async def scenario() -> None:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                config = make_config(root)
+                store = StateStore(config.paths.state_file)
+                dispatcher = Dispatcher(config, store, max_workers=1)
+
+                task = Task(config.repo, Issue(7, "Quiet", "https://example.test/7"))
+
+                with (
+                    patch("dispatcher.queue.LOGGER.isEnabledFor", return_value=False),
+                    patch("dispatcher.queue.LOGGER.info") as mock_info,
+                    patch("dispatcher.queue.utc_now") as mock_utc_now,
+                ):
+                    accepted = await dispatcher._enqueue_task(task)
+
+                self.assertTrue(accepted)
+                mock_info.assert_not_called()
+                mock_utc_now.assert_not_called()
+
+        asyncio.run(scenario())
 
     def test_enqueue_stops_when_shutdown_requested_with_full_queue(self) -> None:
         async def scenario() -> None:

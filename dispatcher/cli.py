@@ -109,7 +109,7 @@ def _log_tracking_summary(config: Config, store: StateBackend) -> None:
     try:
         repo_count = len(_repos_for_polling(config, store))
     except Exception:
-        print("tracking unknown repo(s)")
+        LOGGER.info("tracking unknown repo(s)")
         return
 
-    print(f"tracking {repo_count} repo(s)")
+    LOGGER.info("tracking %d repo(s)", repo_count)

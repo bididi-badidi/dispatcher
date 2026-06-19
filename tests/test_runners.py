@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import tempfile
 import unittest
@@ -14,6 +15,7 @@ from dispatcher.runners import (
     ClaudeReviewRunner,
     ClaudeRunner,
     CodexRunner,
+    CodexWorktreeRunner,
     GeminiRunner,
     build_stage_runners,
 )
@@ -95,29 +97,48 @@ class RunnerTests(unittest.TestCase):
             (git_dir / "commondir").write_text("../..\n", encoding="utf-8")
             runners = build_stage_runners(config)
 
-            gemini = runners["worktree"].command("make worktree", root)
+            self.assertIsInstance(runners["worktree"], CodexWorktreeRunner)
+            worktree_runner = runners["worktree"]
+            worktree_command = worktree_runner.command("make worktree", root)
             claude = runners["plan"].command("plan feature", worktree)
             codex = runners["build"].command("build feature", worktree)
 
-            self.assertEqual(gemini[:3], ["gemini", "--approval-mode", "auto_edit"])
-            self.assertIn("--allowed-tools", gemini)
-            gemini_allowed_tools = gemini[gemini.index("--allowed-tools") + 1].split(
-                ","
+            self.assertEqual(
+                worktree_command[:4],
+                [
+                    "codex",
+                    "exec",
+                    "--sandbox",
+                    "workspace-write",
+                ],
             )
-            self.assertIn("activate_skill", gemini_allowed_tools)
-            self.assertIn("list_directory", gemini_allowed_tools)
-            self.assertIn("read_file", gemini_allowed_tools)
-            self.assertIn("read_many_files", gemini_allowed_tools)
-            self.assertIn("glob", gemini_allowed_tools)
-            self.assertIn("grep_search", gemini_allowed_tools)
-            self.assertIn("web_fetch", gemini_allowed_tools)
-            self.assertIn("run_shell_command", gemini_allowed_tools)
-            self.assertIn("run_shell_command(git)", gemini_allowed_tools)
-            self.assertIn("run_shell_command(bash)", gemini_allowed_tools)
-            self.assertIn("run_shell_command(ls)", gemini_allowed_tools)
-            self.assertIn("run_shell_command(grep)", gemini_allowed_tools)
-            self.assertNotIn("non_existent_tool", gemini_allowed_tools)
-            self.assertNotIn("--sandbox", gemini)
+            self.assertNotIn("--ask-for-approval", worktree_command)
+            worktree_add_dirs = [
+                worktree_command[index + 1]
+                for index, value in enumerate(worktree_command[:-1])
+                if value == "--add-dir"
+            ]
+            self.assertEqual(
+                worktree_add_dirs, [str(config.paths.worktree_root.resolve())]
+            )
+            worktree_configs = [
+                worktree_command[index + 1]
+                for index, value in enumerate(worktree_command[:-1])
+                if value == "--config"
+            ]
+            self.assertEqual(
+                worktree_configs,
+                [
+                    "sandbox_workspace_write.network_access=true",
+                    "sandbox_workspace_write.writable_roots="
+                    f'["{config.paths.worktree_root.resolve()}"]',
+                ],
+            )
+            self.assertEqual(
+                worktree_command[worktree_command.index("--cd") + 1],
+                str(config.paths.project_dir),
+            )
+            self.assertEqual(worktree_command[-1], "make worktree")
             self.assertIn("--print", claude)
             self.assertIn("acceptEdits", claude)
             self.assertIn("--allowedTools", claude)
@@ -175,8 +196,66 @@ class RunnerTests(unittest.TestCase):
             )
             self.assertIn("--cd", codex)
 
-            for command in [gemini, claude, codex]:
+            for command in [worktree_command, claude, codex]:
                 self.assertFalse(BANNED_AGENT_FLAGS.intersection(command))
+
+    def test_codex_worktree_runner_uses_project_dir_as_cwd(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config = make_config(root)
+            runner = CodexWorktreeRunner("prompt", config.paths.worktree_root)
+
+            self.assertEqual(runner.cwd(config, root / "feat" / "issue-9"), root)
+
+    def test_codex_worktree_runner_adds_git_dirs_when_project_dir_is_linked_worktree(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            project_dir = root / "project"
+            project_dir.mkdir()
+            worktree_git_dir = root / "main" / ".git" / "worktrees" / "project"
+            worktree_git_dir.mkdir(parents=True)
+            common_git_dir = root / "main" / ".git"
+            (project_dir / ".git").write_text(
+                f"gitdir: {worktree_git_dir}\n", encoding="utf-8"
+            )
+            (worktree_git_dir / "commondir").write_text("../..\n", encoding="utf-8")
+
+            worktree_root = root / "worktrees"
+            runner = CodexWorktreeRunner("make worktree", worktree_root)
+            command = runner.command("make worktree", project_dir)
+
+            expected_worktree_root = worktree_root.resolve()
+            expected_git_dir = worktree_git_dir.resolve()
+            expected_common = common_git_dir.resolve()
+
+            configs = [
+                command[index + 1]
+                for index, value in enumerate(command[:-1])
+                if value == "--config"
+            ]
+            self.assertIn(
+                "sandbox_workspace_write.writable_roots="
+                + json.dumps(
+                    [
+                        str(expected_worktree_root),
+                        str(expected_git_dir),
+                        str(expected_common),
+                    ]
+                ),
+                configs,
+            )
+
+            add_dirs = [
+                command[index + 1]
+                for index, value in enumerate(command[:-1])
+                if value == "--add-dir"
+            ]
+            self.assertIn(str(expected_worktree_root), add_dirs)
+            self.assertIn(str(expected_git_dir), add_dirs)
+            self.assertIn(str(expected_common), add_dirs)
+            self.assertFalse(BANNED_AGENT_FLAGS.intersection(command))
 
     def test_stage_runner_rejects_banned_automation_flags(self) -> None:
         runner = CodexRunner("prompt")

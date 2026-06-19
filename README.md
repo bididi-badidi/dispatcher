@@ -157,8 +157,9 @@ publishes the local branch before the PR is opened.
 
 The default runners use:
 
-- Gemini creates the worktree and copies `.env` files via the git-worktree
-  skill; it runs with `--approval-mode auto_edit`.
+- Codex creates the worktree and copies `.env` files with
+  `--sandbox workspace-write`, `--ask-for-approval never`, network access
+  enabled, and the configured worktree root added as a writable directory.
 - Claude reads the issue and writes the feature plan into
   `.ai/assets/branches/`; it is restricted to read and plan-asset-write work.
 - Codex implements the plan, commits on the feature branch, and opens the PR;
@@ -190,7 +191,7 @@ uv run pytest
 - `dispatcher/queue.py`, `dispatcher/langgraph_pipeline.py`, and
   `dispatcher/async_runners.py` own daemon-mode queueing, graph orchestration,
   and non-blocking subprocess execution.
-- `dispatcher/runners.py` owns provider-specific Gemini, Claude, and Codex
+- `dispatcher/runners.py` owns provider-specific Codex, Claude, and Gemini
   subprocess commands.
 - `dispatcher/git.py` and `dispatcher/prompts.py` hold worktree/Git helpers and
   prompt templating.
