@@ -15,6 +15,11 @@ from dispatcher.git import (
     worktree_path_for_issue,
 )
 from dispatcher.github import initial_review_cursor, pr_number_from_url
+from dispatcher.logging_setup import (
+    log_workflow_complete,
+    log_workflow_failed,
+    log_workflow_start,
+)
 from dispatcher.models import Config, Issue, IssueState
 from dispatcher.prompts import (
     default_open_pr_command,
@@ -32,6 +37,7 @@ from dispatcher.s3_logs import (
     issue_flow_log_path,
     issue_stage_log_paths,
     uploader_from_config,
+    write_issue_log_fallback,
 )
 from dispatcher.session_log import FlowTrace
 from dispatcher.state_backend import StateBackend
@@ -141,6 +147,14 @@ async def async_run_langgraph_pipeline(
     await flow.enter("START")
     _persist_flow_trace(config, issue.number, flow)
     graph = _build_graph(config, store, issue, shutdown_event, flow)
+    log_workflow_start(
+        repo=repo,
+        issue_number=issue.number,
+        task_type=task_type,
+        worker_id=worker_id,
+        branch=branch,
+        worktree=worktree,
+    )
     try:
         final_state = await graph.ainvoke(initial_state)
     except Exception as exc:
@@ -169,12 +183,21 @@ async def async_run_langgraph_pipeline(
         failed_state["worker_id"] = None
         _persist_state(config, store, failed_state)
         _submit_issue_upload(config, issue.number)
+        log_workflow_failed(repo=repo, issue_number=issue.number, state=failed_state)
         raise
 
     await flow.exit("END")
     _persist_flow_trace(config, issue.number, flow)
     persisted_state = _persist_state(config, store, final_state)
     _submit_issue_upload(config, issue.number)
+    log_workflow_complete(
+        repo=repo,
+        issue_number=issue.number,
+        status=persisted_state.status,
+        build_iteration=persisted_state.build_iteration,
+        pr_url=persisted_state.pr_url,
+        state=final_state,
+    )
     return persisted_state
 
 
@@ -494,13 +517,14 @@ def _require_repo(config: Config) -> str:
 def _submit_issue_upload(config: Config, issue_number: int) -> None:
     repo = _require_repo(config)
     uploader = uploader_from_config(config)
-    if uploader is None:
-        return
     stage_paths = issue_stage_log_paths(config.paths.log_dir, repo, issue_number)
     flow_path = issue_flow_log_path(config.paths.log_dir, repo, issue_number)
     if not stage_paths and not flow_path.is_file():
         return
     paths = [*stage_paths, flow_path] if flow_path.is_file() else stage_paths
+    if uploader is None:
+        write_issue_log_fallback(config, repo, issue_number, paths)
+        return
 
     from dispatcher.background import get_default_background
 

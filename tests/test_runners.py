@@ -37,7 +37,7 @@ class RunnerTests(unittest.TestCase):
             )
 
             with (
-                patch("builtins.print") as print_,
+                patch("dispatcher.subprocess_utils.LOGGER.info") as log_info,
                 patch("dispatcher.runners.subprocess.run", side_effect=[version, run]),
             ):
                 runner.run(
@@ -47,7 +47,7 @@ class RunnerTests(unittest.TestCase):
                     "feat/issue-2",
                 )
 
-            print_.assert_not_called()
+            log_info.assert_not_called()
 
     def test_agent_runner_prints_version_and_launch_commands_when_debug_true(
         self,
@@ -65,7 +65,7 @@ class RunnerTests(unittest.TestCase):
             )
 
             with (
-                patch("builtins.print") as print_,
+                self.assertLogs("dispatcher.subprocess", level="INFO") as logs,
                 patch("dispatcher.runners.subprocess.run", side_effect=[version, run]),
             ):
                 runner.run(
@@ -76,7 +76,7 @@ class RunnerTests(unittest.TestCase):
                 )
 
             self.assertEqual(
-                [call.args[0] for call in print_.call_args_list],
+                [record.getMessage() for record in logs.records],
                 [
                     "$ codex --version",
                     "$ codex exec --sandbox workspace-write --config "
@@ -362,7 +362,7 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(calls[0][1:4], ("example/repo", 8, "worktree"))
         self.assertEqual(calls[0][4].name, "issue-8-worktree.log")
 
-    def test_no_upload_when_bucket_unset(self) -> None:
+    def test_stage_log_fallback_when_bucket_unset(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             worktree = Path(temp_dir)
             config = make_config(worktree)
@@ -379,5 +379,11 @@ class RunnerTests(unittest.TestCase):
                     worktree,
                     "feat/issue-8",
                 )
+
+            fallback = (
+                config.session_log_local_dir / "example/repo" / "issue_8-worktree.log"
+            )
+            self.assertTrue(fallback.is_file())
+            self.assertIn("DRY RUN", fallback.read_text(encoding="utf-8"))
 
         background.assert_not_called()

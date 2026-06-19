@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import subprocess
 import tempfile
 import unittest
@@ -11,16 +12,23 @@ from dispatcher.subprocess_utils import print_subprocess_command, run_json
 
 class SubprocessUtilsTests(unittest.TestCase):
     def test_print_subprocess_command_silent_when_debug_false(self) -> None:
-        with patch("builtins.print") as print_:
+        with patch("dispatcher.subprocess_utils.LOGGER.info") as log_info:
             print_subprocess_command(["gh", "issue", "list"], debug=False)
 
-        print_.assert_not_called()
+        log_info.assert_not_called()
 
     def test_print_subprocess_command_verbose_when_debug_true(self) -> None:
-        with patch("builtins.print") as print_:
+        with patch("dispatcher.subprocess_utils.LOGGER.info") as log_info:
             print_subprocess_command(["gh", "issue", "list"], debug=True)
 
-        print_.assert_called_once_with("$ gh issue list")
+        log_info.assert_called_once_with("$ %s", "gh issue list")
+
+    def test_print_subprocess_command_uses_logging(self) -> None:
+        logger = logging.getLogger("dispatcher.subprocess")
+        with self.assertLogs(logger, level="INFO") as logs:
+            print_subprocess_command(["gh", "issue", "list"], debug=True)
+
+        self.assertIn("$ gh issue list", logs.output[0])
 
     def test_run_json_is_silent_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -30,7 +38,7 @@ class SubprocessUtilsTests(unittest.TestCase):
             )
 
             with (
-                patch("builtins.print") as print_,
+                patch("dispatcher.subprocess_utils.LOGGER.info") as log_info,
                 patch(
                     "dispatcher.subprocess_utils.subprocess.run", return_value=completed
                 ),
@@ -38,7 +46,7 @@ class SubprocessUtilsTests(unittest.TestCase):
                 payload = run_json(["gh", "issue", "list", "open items"], root)
 
             self.assertEqual(payload, [])
-            print_.assert_not_called()
+            log_info.assert_not_called()
 
     def test_run_json_prints_cli_command_when_debug_true(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -48,7 +56,7 @@ class SubprocessUtilsTests(unittest.TestCase):
             )
 
             with (
-                patch("builtins.print") as print_,
+                patch("dispatcher.subprocess_utils.LOGGER.info") as log_info,
                 patch(
                     "dispatcher.subprocess_utils.subprocess.run", return_value=completed
                 ),
@@ -58,4 +66,4 @@ class SubprocessUtilsTests(unittest.TestCase):
                 )
 
             self.assertEqual(payload, [])
-            print_.assert_called_once_with("$ gh issue list 'open items'")
+            log_info.assert_called_once_with("$ %s", "gh issue list 'open items'")

@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import re
-import sys
 from typing import Protocol, Sequence
 
 from dispatcher.config import load_env_file
+from dispatcher.logging_setup import configure_logging
 from dispatcher.redis_store import RedisStateStore
 
 REPO_PATTERN = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
+LOGGER = logging.getLogger("dispatcher.repos_cli")
 
 
 class RepoStore(Protocol):
@@ -23,22 +25,22 @@ class RepoStore(Protocol):
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    configure_logging()
     args = _parse_args(argv)
 
     load_env_file()
     redis_url = args.redis_url or os.getenv("DISPATCHER_REDIS_URL")
 
     if not redis_url:
-        print(
+        LOGGER.error(
             "error: DISPATCHER_REDIS_URL is not set "
-            "(set the environment variable or pass --redis-url)",
-            file=sys.stderr,
+            "(set the environment variable or pass --redis-url)"
         )
         return 2
 
     for repo in getattr(args, "repos", []):
         if not _is_valid_repo(repo):
-            print(f"error: invalid repo {repo!r}, expected owner/name", file=sys.stderr)
+            LOGGER.error("error: invalid repo %r, expected owner/name", repo)
             return 2
 
     store = RedisStateStore(redis_url)
@@ -77,7 +79,7 @@ def _dispatch(args: argparse.Namespace, store: RepoStore) -> int:
     if args.command == "add":
         for repo in args.repos:
             store.add_repo(repo)
-            print(f"tracked: {repo}")
+            LOGGER.info("tracked: %s", repo)
         return 0
 
     if args.command == "list":
@@ -88,7 +90,7 @@ def _dispatch(args: argparse.Namespace, store: RepoStore) -> int:
     if args.command == "remove":
         for repo in args.repos:
             store.remove_repo(repo)
-            print(f"removed (or already absent): {repo}")
+            LOGGER.info("removed (or already absent): %s", repo)
         return 0
 
     raise AssertionError(f"unhandled command: {args.command}")
