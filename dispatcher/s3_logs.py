@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import io
 import logging
 import shutil
 from functools import lru_cache
@@ -8,6 +7,7 @@ from pathlib import Path
 from typing import Iterable
 
 from dispatcher.models import Config
+from dispatcher.session_log import compose_rollup
 
 CONTENT_TYPE = "text/plain; charset=utf-8"
 LOGGER = logging.getLogger("dispatcher.s3_logs")
@@ -44,13 +44,19 @@ class S3LogUploader:
         self, repo: str, issue_number: int, stage_paths: Iterable[Path]
     ) -> None:
         key = self._key(repo, f"issue_{issue_number}.log")
-        body = io.BytesIO()
-        for path in _sort_stage_paths(stage_paths, issue_number):
-            stage = _stage_name_from_path(path, issue_number)
-            body.write(f"=== {stage} ===\n".encode("utf-8"))
-            body.write(path.read_bytes())
-            body.write(b"\n\n")
-        self._put_object(key, body.getvalue())
+        all_paths = list(stage_paths)
+        stage_path_list = [
+            path for path in all_paths if not _is_flow_log_path(path, issue_number)
+        ]
+        flow = issue_flow_log_path_from_stage_paths(all_paths, repo, issue_number)
+        body = compose_rollup(
+            flow.read_text(encoding="utf-8") if flow.is_file() else "",
+            [
+                (_stage_name_from_path(path, issue_number), path)
+                for path in _sort_stage_paths(stage_path_list, issue_number)
+            ],
+        )
+        self._put_object(key, body)
 
     def _key(self, repo: str, filename: str) -> str:
         return f"{self.key_prefix}{repo}/{filename}"
@@ -102,18 +108,25 @@ def write_stage_log_fallback(
 def write_issue_log_fallback(
     config: Config, repo: str, issue_number: int, stage_paths: Iterable[Path]
 ) -> Path | None:
-    sorted_paths = _sort_stage_paths(stage_paths, issue_number)
-    if not sorted_paths:
+    all_paths = list(stage_paths)
+    if not all_paths:
         return None
 
     destination = _fallback_repo_dir(config, repo) / f"issue_{issue_number}.log"
     destination.parent.mkdir(parents=True, exist_ok=True)
-    with destination.open("wb") as output:
-        for path in sorted_paths:
-            stage = _stage_name_from_path(path, issue_number)
-            output.write(f"=== {stage} ===\n".encode("utf-8"))
-            output.write(path.read_bytes())
-            output.write(b"\n\n")
+    stage_path_list = [
+        path for path in all_paths if not _is_flow_log_path(path, issue_number)
+    ]
+    flow = issue_flow_log_path_from_stage_paths(all_paths, repo, issue_number)
+    destination.write_bytes(
+        compose_rollup(
+            flow.read_text(encoding="utf-8") if flow.is_file() else "",
+            [
+                (_stage_name_from_path(path, issue_number), path)
+                for path in _sort_stage_paths(stage_path_list, issue_number)
+            ],
+        )
+    )
     LOGGER.info(
         "wrote local session issue log fallback",
         extra={"repo": repo, "issue_number": issue_number, "path": str(destination)},
@@ -126,8 +139,25 @@ def issue_stage_log_paths(log_dir: Path, repo: str, issue_number: int) -> list[P
     if not repo_log_dir.is_dir():
         return []
     return _sort_stage_paths(
-        repo_log_dir.glob(f"issue-{issue_number}-*.log"), issue_number
+        (
+            path
+            for path in repo_log_dir.glob(f"issue-{issue_number}-*.log")
+            if not _is_flow_log_path(path, issue_number)
+        ),
+        issue_number,
     )
+
+
+def issue_flow_log_path(log_dir: Path, repo: str, issue_number: int) -> Path:
+    return log_dir / repo / f"issue-{issue_number}-flow.log"
+
+
+def issue_flow_log_path_from_stage_paths(
+    stage_paths: Iterable[Path], repo: str, issue_number: int
+) -> Path:
+    for path in stage_paths:
+        return path.parent / f"issue-{issue_number}-flow.log"
+    return Path(repo) / f"issue-{issue_number}-flow.log"
 
 
 def _fallback_repo_dir(config: Config, repo: str) -> Path:
@@ -164,3 +194,7 @@ def _stage_name_from_path(path: Path, issue_number: int) -> str:
     if name.startswith(prefix) and name.endswith(".log"):
         return name[len(prefix) : -len(".log")]
     return path.stem
+
+
+def _is_flow_log_path(path: Path, issue_number: int) -> bool:
+    return path.name == f"issue-{issue_number}-flow.log"
