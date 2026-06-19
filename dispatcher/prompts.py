@@ -27,7 +27,10 @@ def render_template(
 def default_worktree_command() -> str:
     return (
         "Create a git worktree for GitHub issue #$issue_number "
-        "($issue_title) based on $base_branch at $worktree using branch $branch."
+        "($issue_title): from $project_dir, fetch origin $base_branch if needed, "
+        "create $worktree using branch $branch based on $base_branch, then copy "
+        "seed config files such as .env and .env.local from $project_dir into "
+        "$worktree. Do not modify code."
     )
 
 
@@ -69,7 +72,12 @@ def default_review_quality_command() -> str:
 
 def default_open_pr_command() -> str:
     return (
-        "Push branch $branch for GitHub issue #$issue_number to the remote and "
-        "open a pull request against $base_branch. The PR body must include "
-        "Closes #$issue_number. Print the PR URL when done."
+        "From the worktree at $worktree (use `git -C $worktree ...`), push "
+        "branch $branch for GitHub issue #$issue_number to the remote and open "
+        "a pull request against $base_branch. Write the PR body to a file "
+        "under /tmp (e.g. /tmp/pr-body-$issue_number.md), then call "
+        "`gh pr create --body-file <that-file> --head $branch --base "
+        "$base_branch -R $repo`. The PR body must include Closes "
+        "#$issue_number. Do not edit any files inside $worktree. Print the PR "
+        "URL when done."
     )
