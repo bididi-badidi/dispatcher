@@ -1,0 +1,3 @@
+# boto3 and botocore are bundled in the AWS Lambda Python runtime, so no
+# packaged dependencies are required. Pin a version here only if you need a
+# newer boto3 than the runtime ships.

@@ -1,0 +1,67 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  S3-triggered Lambda that loads uploaded log files into CloudWatch Logs.
+
+Parameters:
+  LogBucketName:
+    Type: String
+    Description: Name of the existing S3 bucket that receives dispatcher logs.
+  LogKeyPrefix:
+    Type: String
+    Default: ""
+    Description: Only objects under this key prefix trigger the function (optional).
+  TargetLogGroup:
+    Type: String
+    Default: /dispatcher/s3-logs
+    Description: CloudWatch log group that ingested lines are written to.
+
+Resources:
+  S3ToCloudWatchFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: dispatcher-s3-to-cloudwatch
+      Handler: handler.lambda_handler
+      Runtime: python3.11
+      CodeUri: .
+      Timeout: 120
+      MemorySize: 256
+      Environment:
+        Variables:
+          LOG_GROUP_NAME: !Ref TargetLogGroup
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref LogBucketName
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource:
+                - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${TargetLogGroup}:*"
+      Events:
+        LogUploaded:
+          Type: S3
+          Properties:
+            Bucket: !Ref LogBucket
+            Events: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: !Ref LogKeyPrefix
+
+  # Referenced by the S3 event above. If your bucket already exists, remove this
+  # resource and wire the notification onto the existing bucket instead — SAM's
+  # S3 event source requires the bucket to be defined in the same template.
+  LogBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref LogBucketName
+
+Outputs:
+  FunctionArn:
+    Value: !GetAtt S3ToCloudWatchFunction.Arn
+  LogGroup:
+    Value: !Ref TargetLogGroup
